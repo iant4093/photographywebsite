@@ -3985,7 +3985,7 @@ Resources:
         ReconcileArchives:
           Type: Schedule
           Properties:
-            Schedule: rate(15 minutes)
+            Schedule: rate(1 hour)
             Enabled: true
 
   CreateZipFunction:

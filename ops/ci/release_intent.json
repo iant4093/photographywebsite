@@ -264,6 +264,7 @@
     {"logicalId": "ZipArchiveRefreshFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "ZipArchiveRefreshFunctionAlbumsChanged", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "ZipArchiveRefreshFunctionReconcileArchives", "resourceType": "AWS::Events::Rule", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipArchiveRefreshFunctionReconcileArchives", "resourceType": "AWS::Events::Rule", "action": "Modify", "propertyPaths": ["ScheduleExpression"], "allowNoDetails": false},
     {"logicalId": "ZipArchiveRefreshFunctionReconcileArchivesPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "WorkerZipFunctionArchiveJobs", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "WorkerZipFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["ManagedPolicyArns", "Policies", "Tags"], "allowNoDetails": false, "allowProtectedModify": true},

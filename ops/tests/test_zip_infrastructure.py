@@ -34,7 +34,7 @@ class ZipInfrastructureTests(unittest.TestCase):
         function = resource_block('ZipArchiveRefreshFunction')
         self.assertIn('Stream: !GetAtt AlbumsTable.StreamArn', function)
         self.assertIn('MaximumBatchingWindowInSeconds: 10', function)
-        self.assertIn('Schedule: rate(15 minutes)', function)
+        self.assertIn('Schedule: rate(1 hour)', function)
         self.assertIn('dynamodb:Scan', function)
         self.assertIn('ReportBatchItemFailures', function)
         self.assertIn('SOURCES_ZipArchiveRefreshFunction :=', MAKEFILE)

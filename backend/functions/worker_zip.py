@@ -15,8 +15,11 @@ from botocore.config import Config
 from album_access import authorize_album
 from media_access import bucket_name, validate_album_media_key
 from validation_helpers import ValidationError, validate_uuid
-from zip_helpers import archive_entries, get_album_record, zip_keys, zip_version
-from zip_jobs import object_metadata
+from zip_helpers import (
+    ZIP_LINK_SECONDS, archive_entries, get_album_record, is_on_demand_zip, reusable_zip,
+    zip_archive_expired, zip_keys, zip_version,
+)
+from zip_jobs import album_archives, object_metadata
 
 
 logger = logging.getLogger("photography_api.zip_worker")
@@ -120,14 +123,15 @@ def _validated_album(event):
     raise ValidationError("Missing album identifier")
 
 
-def _prune_archives(album_id, keep_key=None):
-    # Retain the current object indefinitely. Superseded objects become delete
-    # markers; the bucket lifecycle expires their noncurrent bytes after a day.
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket_name(), Prefix=f"album-zips/{album_id}/"):
-        for item in page.get("Contents", []):
-            if item["Key"] != keep_key:
-                s3.delete_object(Bucket=bucket_name(), Key=item["Key"])
+def _prune_archives(album_id, keep_key=None, *, expired_only=False):
+    # A delete marker hides the object. S3 expires its noncurrent bytes after a day.
+    bucket = bucket_name()
+    for archive in album_archives(s3, bucket, album_id):
+        if archive["Key"] == keep_key:
+            continue
+        if expired_only and not zip_archive_expired(archive, grace_seconds=ZIP_LINK_SECONDS):
+            continue
+        s3.delete_object(Bucket=bucket, Key=archive["Key"])
 
 
 def _still_current(album):
@@ -155,6 +159,13 @@ def _write_failure(key, code, message):
 def _build(event, context):
     album = _validated_album(event)
     album_id = album["albumId"] if album else validate_uuid(event.get("albumId"))
+    if event.get("operation") == "expire":
+        # Recheck the latest visibility and object timestamps inside the same
+        # per-album FIFO group used for builds. An older job cannot delete a
+        # refreshed archive or one that became eligible for prebuilding.
+        if album and is_on_demand_zip(album):
+            _prune_archives(album_id, expired_only=True)
+        return {"status": "retention_checked"}
     if not album:
         # A delayed message must not resurrect a deleted/unavailable album.
         _prune_archives(album_id)
@@ -164,7 +175,7 @@ def _build(event, context):
         _prune_archives(album_id)
         return {"status": "empty"}
     zip_key, failure_key = zip_keys(album)
-    if object_metadata(s3, bucket_name(), zip_key):
+    if reusable_zip(album, object_metadata(s3, bucket_name(), zip_key)):
         _prune_archives(album_id, zip_key)
         return {"status": "ready"}
 

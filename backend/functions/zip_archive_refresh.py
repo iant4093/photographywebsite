@@ -1,4 +1,4 @@
-"""Prepare current ZIPs from album changes; reconcile existing albums in pages."""
+"""Prebuild eligible ZIPs and reconcile archive retention in pages."""
 
 from performance_observation import measure_handler
 
@@ -11,8 +11,8 @@ import boto3
 
 from media_access import bucket_name
 from validation_helpers import ValidationError, validate_uuid
-from zip_helpers import get_album_record, zip_keys
-from zip_jobs import enqueue_zip, object_metadata
+from zip_helpers import ZIP_LINK_SECONDS, get_album_record, is_on_demand_zip, zip_archive_expired, zip_keys
+from zip_jobs import album_archives, enqueue_zip, object_metadata
 
 
 s3 = boto3.client("s3")
@@ -20,9 +20,16 @@ logger = logging.getLogger("photography_api.zip_refresh")
 CURSOR_KEY = "temp-zips/zip-reconciliation.json"
 
 
-def refresh_album(album_id, *, request_id=None):
+def refresh_album(album_id, *, request_id=None, reconcile=False):
     album = get_album_record(album_id=album_id)
     if album and (album.get("status", "active") != "active" or album.get("createdBySub")):
+        return
+    if album and is_on_demand_zip(album):
+        if reconcile and any(
+            zip_archive_expired(archive, grace_seconds=ZIP_LINK_SECONDS)
+            for archive in album_archives(s3, bucket_name(), album_id)
+        ):
+            enqueue_zip(album_id, album, request_id=request_id, expire=True)
         return
     if album and object_metadata(s3, bucket_name(), zip_keys(album)[0]):
         return
@@ -47,7 +54,7 @@ def _reconcile():
             album_id = validate_uuid(item.get("albumId"))
         except ValidationError:
             continue
-        refresh_album(album_id, request_id=f"reconcile:{int(time.time()) // 900}")
+        refresh_album(album_id, request_id=f"reconcile:{int(time.time()) // 3600}", reconcile=True)
     s3.put_object(
         Bucket=bucket_name(), Key=CURSOR_KEY,
         Body=json.dumps(page.get("LastEvaluatedKey")),

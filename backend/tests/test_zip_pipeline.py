@@ -1,6 +1,7 @@
 """Archive freshness, original bytes, queue recovery, and background preparation."""
 
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
@@ -21,6 +22,7 @@ from zip_helpers import archive_entries, zip_keys, zip_version
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
 KEY = f"albums/{ALBUM_ID}/original/one.jpg"
 KEY2 = f"albums/{ALBUM_ID}/original/two.mp4"
+OLD_UPLOAD = "2025-01-01T12:00:00Z"
 
 
 def album(**changes):
@@ -61,17 +63,42 @@ class ArchiveIdentityTests(unittest.TestCase):
         ]))
         self.assertEqual([item["name"] for item in entries], ["0001_Beach.jpg", "0002_Beach.jpg", "0003_bad___.jpg"])
 
+    def test_only_older_public_albums_use_on_demand_builds(self):
+        now = datetime.now(timezone.utc)
+        self.assertTrue(zip_helpers.is_on_demand_zip(album(uploadedAt=OLD_UPLOAD)))
+        self.assertTrue(zip_helpers.is_on_demand_zip(album(createdAt="2025-01-01")))
+        for record in (
+            album(visibility="private", uploadedAt=OLD_UPLOAD),
+            album(visibility="unlisted", uploadedAt=OLD_UPLOAD),
+            album(createdAt=OLD_UPLOAD, uploadedAt=now.isoformat()),
+            album(uploadedAt="invalid"),
+            album(),
+        ):
+            with self.subTest(record=record):
+                self.assertFalse(zip_helpers.is_on_demand_zip(record))
+
+    def test_expired_archive_stops_getting_links_before_it_can_be_pruned(self):
+        now = datetime.now(timezone.utc)
+        just_expired = {"LastModified": now - timedelta(days=30, minutes=2)}
+        cold = album(uploadedAt=OLD_UPLOAD)
+        self.assertFalse(zip_helpers.reusable_zip(cold, just_expired))
+        self.assertTrue(zip_helpers.reusable_zip(album(visibility="private"), just_expired))
+        self.assertFalse(zip_helpers.zip_archive_expired(just_expired, grace_seconds=zip_helpers.ZIP_LINK_SECONDS))
+
     def test_queue_serializes_one_album_and_deduplicates_clicks_but_not_later_edits(self):
         sqs = Mock()
         with patch.dict(os.environ, {"ZIP_QUEUE_URL": "queue"}), patch.object(zip_jobs.boto3, "client", return_value=sqs):
             zip_jobs.enqueue_zip(ALBUM_ID, album())
             zip_jobs.enqueue_zip(ALBUM_ID, album())
             zip_jobs.enqueue_zip(ALBUM_ID, album(), request_id="later-rename-back")
+            zip_jobs.enqueue_zip(ALBUM_ID, album(), expire=True)
         calls = [call.kwargs for call in sqs.send_message.call_args_list]
         self.assertTrue(all(call["MessageGroupId"] == ALBUM_ID for call in calls))
         self.assertEqual(calls[0]["MessageDeduplicationId"], calls[1]["MessageDeduplicationId"])
         self.assertNotEqual(calls[1]["MessageDeduplicationId"], calls[2]["MessageDeduplicationId"])
         self.assertNotIn("DelaySeconds", calls[0])
+        self.assertNotEqual(calls[0]["MessageDeduplicationId"], calls[3]["MessageDeduplicationId"])
+        self.assertEqual(json.loads(calls[3]["MessageBody"])["operation"], "expire")
 
 
 class WorkerTests(unittest.TestCase):
@@ -114,6 +141,32 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(worker_zip.handler({"albumId": ALBUM_ID}, None)["status"], "ready")
         self.s3.head_object.assert_not_called()
         self.s3.create_multipart_upload.assert_not_called()
+
+    def test_expiration_rechecks_album_and_prunes_only_aged_archives(self):
+        self.record = album(uploadedAt=OLD_UPLOAD)
+        prefix = f"album-zips/{ALBUM_ID}/"
+        now = datetime.now(timezone.utc)
+        self.s3.get_paginator.return_value.paginate.return_value = [{"Contents": [
+            {"Key": f"{prefix}aged.zip", "LastModified": now - timedelta(days=31)},
+            {"Key": f"{prefix}in-grace.zip", "LastModified": now - timedelta(days=30, minutes=2)},
+            {"Key": f"{prefix}rebuilt.zip", "LastModified": now},
+        ]}]
+        event = {"albumId": ALBUM_ID, "operation": "expire"}
+        self.assertEqual(worker_zip.handler(event, None), {"status": "retention_checked"})
+        self.s3.delete_object.assert_called_once_with(Bucket="images-test", Key=f"{prefix}aged.zip")
+        self.s3.create_multipart_upload.assert_not_called()
+
+        self.record = album(visibility="private", uploadedAt=OLD_UPLOAD)
+        self.s3.reset_mock()
+        worker_zip.handler(event, None)
+        self.s3.delete_object.assert_not_called()
+
+    def test_demand_build_replaces_an_expired_archive(self):
+        self.record = album(uploadedAt=OLD_UPLOAD)
+        expired = {"LastModified": datetime.now(timezone.utc) - timedelta(days=31)}
+        with patch.object(worker_zip, "object_metadata", return_value=expired):
+            self.assertEqual(worker_zip.handler({"albumId": ALBUM_ID}, None)["status"], "complete")
+        self.assertEqual(self.s3.create_multipart_upload.call_args.kwargs["Key"], zip_keys(self.record)[0])
 
     def test_rename_or_removal_during_build_aborts_unpublished_archive(self):
         for current in (album(title="Changed"), album(images=[]), None):
@@ -203,6 +256,18 @@ class RefreshTests(unittest.TestCase):
                 refresh.refresh_album(ALBUM_ID)
             enqueue.assert_called_once_with(ALBUM_ID, None, request_id=None)
 
+    def test_cold_album_changes_skip_prebuild_and_reconciliation_queues_expiration(self):
+        cold = album(uploadedAt=OLD_UPLOAD)
+        expired = {"LastModified": datetime.now(timezone.utc) - timedelta(days=31)}
+        with patch.object(refresh, "get_album_record", return_value=cold), patch.object(
+            refresh, "album_archives", return_value=[expired]
+        ) as archives, patch.object(refresh, "enqueue_zip") as enqueue:
+            refresh.refresh_album(ALBUM_ID)
+            archives.assert_not_called()
+            enqueue.assert_not_called()
+            refresh.refresh_album(ALBUM_ID, request_id="hour", reconcile=True)
+            enqueue.assert_called_once_with(ALBUM_ID, cold, request_id="hour", expire=True)
+
     def test_reconciliation_paginates_existing_albums_and_persists_cursor_after_enqueue(self):
         resource, s3 = Mock(), Mock()
         resource.Table.return_value.scan.return_value = {"Items": [{"albumId": ALBUM_ID}], "LastEvaluatedKey": {"albumId": ALBUM_ID}}
@@ -255,6 +320,19 @@ class DownloadStatusTests(unittest.TestCase):
             with patch.object(create_zip, "_object_metadata", return_value=None), patch.object(create_zip, "enqueue_zip") as enqueue:
                 self.assertEqual(create_zip.handler(event, None)["statusCode"], 202)
                 enqueue.assert_called_once_with(ALBUM_ID, current)
+
+    def test_expired_cold_archive_queues_a_build_instead_of_signing_a_link(self):
+        cold = album(uploadedAt=OLD_UPLOAD)
+        expired = {"LastModified": datetime.now(timezone.utc) - timedelta(days=31)}
+        with patch.object(create_zip, "get_album_record", return_value=cold), patch.object(
+            create_zip, "get_verified_claims", return_value=None
+        ), patch.object(create_zip, "check_rate_limit", return_value=True), patch.object(
+            create_zip, "_object_metadata", side_effect=[expired, None]
+        ), patch.object(create_zip, "presigned_get_url") as sign, patch.object(create_zip, "enqueue_zip") as enqueue:
+            result = create_zip.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
+        self.assertEqual(result["statusCode"], 202)
+        enqueue.assert_called_once_with(ALBUM_ID, cold)
+        sign.assert_not_called()
 
     def test_terminal_build_failure_is_exposed_to_polling(self):
         failure = {"status": "failed", "code": "ZIP_TOO_LARGE", "message": "Too large"}

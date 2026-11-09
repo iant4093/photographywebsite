@@ -1,5 +1,6 @@
 """Shared deterministic ZIP job helpers."""
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -11,6 +12,36 @@ from boto3.dynamodb.conditions import Key
 
 
 dynamodb = boto3.resource("dynamodb")
+PUBLIC_ZIP_PREBUILD_AGE = timedelta(days=90)
+ON_DEMAND_ZIP_AGE = timedelta(days=30)
+ZIP_LINK_SECONDS = 600
+
+
+def is_on_demand_zip(album):
+    """Keep protected and recent albums prebuilt, including undated legacy records."""
+    if album.get("visibility") != "public":
+        return False
+    date = album.get("uploadedAt") or album.get("createdAt")
+    if not isinstance(date, str):
+        return False
+    try:
+        uploaded = datetime.fromisoformat(date)
+    except ValueError:
+        return False
+    if uploaded.tzinfo is None:
+        uploaded = uploaded.replace(tzinfo=timezone.utc)
+    return uploaded <= datetime.now(timezone.utc) - PUBLIC_ZIP_PREBUILD_AGE
+
+
+def zip_archive_expired(archive, *, grace_seconds=0):
+    modified = archive.get("LastModified")
+    if not isinstance(modified, datetime) or modified.tzinfo is None:
+        return False
+    return modified <= datetime.now(timezone.utc) - ON_DEMAND_ZIP_AGE - timedelta(seconds=grace_seconds)
+
+
+def reusable_zip(album, archive):
+    return bool(archive) and (not is_on_demand_zip(album) or not zip_archive_expired(archive))
 
 
 def get_album_record(album_id=None, share_code=None):

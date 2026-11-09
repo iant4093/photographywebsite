@@ -637,7 +637,7 @@ artifacts, or change any stack.
 application stack's processed template, the current release SHA, and up to five
 of the most recent distinct successful `Release production` SHAs (at least two
 are required). Every other recognized release attempt is kept for at least
-`ReleaseArtifactNoncurrentRetentionDays` (default 60, minimum 30, currently 60).
+`ReleaseArtifactNoncurrentRetentionDays` (default and minimum 30 days).
 If an attempt has any recent object or any key with an unrecognized layout, the
 whole attempt is kept. Cleanup considers both current and noncurrent versions,
 and inventories only the `releases/` prefix.

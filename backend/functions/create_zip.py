@@ -14,7 +14,7 @@ from media_access import bucket_name, presigned_get_url
 from response_helpers import error_response, internal_error, json_response
 from security_helpers import check_rate_limit, is_rate_limit_denied
 from validation_helpers import ValidationError, validate_uuid
-from zip_helpers import get_album_record, raw_image_keys, zip_keys
+from zip_helpers import ZIP_LINK_SECONDS, get_album_record, raw_image_keys, reusable_zip, zip_keys
 from zip_jobs import enqueue_zip, object_metadata
 
 
@@ -105,7 +105,7 @@ def handler(event, context):
 
         zip_key, failure_key = zip_keys(album)
         bucket = bucket_name()
-        if _object_metadata(bucket, zip_key):
+        if reusable_zip(album, _object_metadata(bucket, zip_key)):
             _audit(
                 event, context, "success", "archive_ready", zip_state="ready",
                 actor_type=access_actor, auth_method=access_auth,
@@ -114,7 +114,7 @@ def handler(event, context):
                 200,
                 {
                     "status": "ready",
-                    "url": presigned_get_url(zip_key, download_filename=f"{album.get('title', 'album')}.zip", expiration=600),
+                    "url": presigned_get_url(zip_key, download_filename=f"{album.get('title', 'album')}.zip", expiration=ZIP_LINK_SECONDS),
                 },
             )
 

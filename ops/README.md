@@ -267,6 +267,21 @@ pending-tagged object, commits its DynamoDB key only if the visibility and
 share state are unchanged, and then sets the final public or unlisted tag. Run
 the dry run again after apply and check that `plannedRepairCount` is zero.
 
+## Album ZIP retention
+
+Private and unlisted albums, and public albums younger than 90 days, are
+prebuilt after album changes. Age is based on upload time, with the album date
+as a fallback for legacy records. Public albums with an unknown date stay
+eligible for prebuilding.
+
+Older public albums build ZIPs when requested. Their generated archives are
+reusable for 30 days. Hourly reconciliation queues expiration once the
+10-minute lifetime of any outstanding download link has also elapsed. The
+worker uses the same per-album FIFO queue as builds and rechecks the current
+album and object timestamps before deleting an expired ZIP. S3 retains the
+noncurrent version for one day. The source media and the existing
+Intelligent-Tiering rules are independent of ZIP expiration.
+
 ## Before a manual change
 
 1. Run the full repository tests and `ops/validate_infrastructure.sh`.
