@@ -11,6 +11,7 @@ const PAGE_TITLES = {
     '/apps/truongscaler': 'TruongScaler — 2× Photo Upscaling for iPhone',
     '/apps/truongflix': 'TruongFlix — Local Media Center for Mac and Windows',
     '/apps/truongcleaner': 'TruongCleaner — Storage Cleaner for Mac',
+    '/apps/photo-api': 'Photo API',
     '/privacy': 'Privacy Notice',
     '/terms': 'Terms & Photo Use',
     '/print-policy': 'Print Orders & Returns',

@@ -1,0 +1,347 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dedicated CloudFront Free flat-rate distribution for the public Photo API.
+
+Parameters:
+  Domain:
+    Type: String
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+  CertificateArn:
+    Type: String
+  ImagesBucket:
+    Type: String
+  ImagesRegion:
+    Type: String
+    Default: us-west-2
+  SelectorArn:
+    Type: String
+  Traffic:
+    Type: String
+    Default: paused
+    AllowedValues: [paused, live]
+  AlbumsTable:
+    Type: String
+    Default: GoldenHour-Albums-prod
+  AlbumMediaTable:
+    Type: String
+    Default: GoldenHour-AlbumMedia-prod
+  PublisherCodeKey:
+    Type: String
+    Default: ''
+
+Conditions:
+  TrafficLive: !Equals [!Ref Traffic, live]
+  HasPublisher: !Not [!Equals [!Ref PublisherCodeKey, '']]
+  RunPublisher: !And [!Condition HasPublisher, !Condition TrafficLive]
+
+Resources:
+  CatalogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldCatalogs
+            Prefix: catalog/
+            Status: Enabled
+            ExpirationInDays: 30
+
+  CatalogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CatalogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: OnlyDedicatedCloudFrontReadsCatalog
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${CatalogBucket.Arn}/catalog/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  OriginAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Ref AWS::StackName
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Ref AWS::StackName
+      Scope: CLOUDFRONT
+      DefaultAction: !If [TrafficLive, {Allow: {}}, {Block: {}}]
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: PhotoApi
+        SampledRequestsEnabled: false
+      Rules:
+        - Name: PerIp
+          Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              AggregateKeyType: IP
+              Limit: 100
+              EvaluationWindowSec: 300
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: PhotoApiPerIp
+            SampledRequestsEnabled: false
+
+  ResponseFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-response'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Keep public JSON and image URLs revalidating on the client.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          const response = event.response;
+          response.headers['cache-control'] = {value: 'no-store'};
+          response.headers['access-control-allow-origin'] = {value: '*'};
+          response.headers['x-content-type-options'] = {value: 'nosniff'};
+          return response;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Ian Truong Photography public Photo API
+        Enabled: true
+        IPV6Enabled: true
+        HttpVersion: http2and3
+        Aliases: !If [HasPublisher, [!Ref Domain], !Ref AWS::NoValue]
+        ViewerCertificate:
+          !If
+          - HasPublisher
+          - AcmCertificateArn: !Ref CertificateArn
+            MinimumProtocolVersion: TLSv1.2_2021
+            SslSupportMethod: sni-only
+          - CloudFrontDefaultCertificate: true
+        WebACLId: !GetAtt WebAcl.Arn
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ErrorCachingMinTTL: 0
+        Origins:
+          - Id: Catalog
+            DomainName: !GetAtt CatalogBucket.RegionalDomainName
+            OriginAccessControlId: !Ref OriginAccess
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: Photos
+            DomainName: !Sub '${ImagesBucket}.s3.${ImagesRegion}.${AWS::URLSuffix}'
+            OriginAccessControlId: !Ref OriginAccess
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: Catalog
+          ViewerProtocolPolicy: https-only
+          AllowedMethods: [GET, HEAD]
+          # AWS-managed CachingOptimized policy. The edge rewrites to immutable catalog keys.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !Ref SelectorArn
+            - EventType: viewer-response
+              FunctionARN: !GetAtt ResponseFunction.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /v1/images/*
+            TargetOriginId: Photos
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD]
+            # CachingDisabled: S3 checks the photo's current visibility on every download.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !Ref SelectorArn
+              - EventType: viewer-response
+                FunctionARN: !GetAtt ResponseFunction.FunctionARN
+
+  FreePlan:
+    Type: AWS::PricingPlanManager::Subscription
+    Metadata:
+      # The live CloudFormation registry has this type before cfn-lint's bundled schema.
+      cfn-lint:
+        config:
+          ignore_checks: [E3006]
+    Properties:
+      PlanFamily: CloudFront
+      PlanTier: FREE
+      UsageLevel: DEFAULT
+      ResourceArns:
+        - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+        - !GetAtt WebAcl.Arn
+
+  Dns:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: HasPublisher
+    DependsOn: FreePlan
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref Domain
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Ref Domain
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
+  BandwidthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-download-spike'
+      AlarmDescription: Photo API delivered at least 5 GB in a five-minute interval.
+      Namespace: AWS/CloudFront
+      MetricName: BytesDownloaded
+      Dimensions:
+        - Name: DistributionId
+          Value: !Ref Distribution
+        - Name: Region
+          Value: Global
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5000000000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  PublisherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasPublisher
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-publisher'
+      RetentionInDays: 14
+
+  PublisherRole:
+    Type: AWS::IAM::Role
+    Condition: HasPublisher
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PublishPhotoCatalog
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${AlbumsTable}/index/VisibilityCreatedAtIndex'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${AlbumMediaTable}'
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${AlbumsTable}'
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucket}/albums/*'
+                Condition:
+                  StringEquals:
+                    s3:ExistingObjectTag/visibility: public
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt CatalogBucket.Arn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource:
+                  - !Sub '${CatalogBucket.Arn}/state/catalog.json'
+                  - !Sub '${CatalogBucket.Arn}/state/signing-key'
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub '${CatalogBucket.Arn}/catalog/*'
+              - Effect: Allow
+                Action: [cloudfront:DescribeFunction, cloudfront:UpdateFunction, cloudfront:PublishFunction]
+                Resource: !Ref SelectorArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt PublisherLogGroup.Arn
+
+  Publisher:
+    Type: AWS::Lambda::Function
+    Condition: HasPublisher
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-publisher'
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: photo_api_publisher.handler
+      Role: !GetAtt PublisherRole.Arn
+      MemorySize: 256
+      Timeout: 300
+      ReservedConcurrentExecutions: 1
+      Code:
+        S3Bucket: !Ref CatalogBucket
+        S3Key: !Ref PublisherCodeKey
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          CATALOG_BUCKET: !Ref CatalogBucket
+          IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_REGION: !Ref ImagesRegion
+          PHOTO_API_DOMAIN: !Ref Domain
+          SELECTOR_NAME: !Select [1, !Split ['/', !Ref SelectorArn]]
+
+  RefreshCatalog:
+    Type: AWS::Events::Rule
+    Condition: HasPublisher
+    Properties:
+      ScheduleExpression: rate(15 minutes)
+      State: !If [RunPublisher, ENABLED, DISABLED]
+      Targets:
+        - Id: Publisher
+          Arn: !GetAtt Publisher.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 1
+            MaximumEventAgeInSeconds: 600
+
+  RefreshPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasPublisher
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Publisher
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RefreshCatalog.Arn
+
+Outputs:
+  DistributionId:
+    Value: !Ref Distribution
+  DistributionDomain:
+    Value: !GetAtt Distribution.DomainName
+  CatalogBucket:
+    Value: !Ref CatalogBucket
+  FreeSubscription:
+    Value: !Ref FreePlan

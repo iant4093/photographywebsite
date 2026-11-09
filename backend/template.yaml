@@ -157,6 +157,8 @@ Rules:
 
 Conditions:
   SeparateAlbumWork: !Equals [!Ref AlbumWorkRouting, separated]
+  IsPhotoApiProduction:
+    !And [!Equals [!Ref Stage, prod], !Equals [!Ref 'AWS::AccountId', '428207759706']]
   EnableOriginalComparisons: !And
     - !Equals [!Ref OriginalComparisonsEnabled, 'true']
     - !Not [!Equals [!Ref GoogleOAuthSecretArn, '']]
@@ -1080,6 +1082,19 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+          - !If
+            - IsPhotoApiProduction
+            - Sid: AllowPhotoApiPublicAlbumObjects
+              Effect: Allow
+              Principal:
+                Service: cloudfront.amazonaws.com
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+              Condition:
+                StringEquals:
+                  AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/ELJ8B08P3KWJ6'
+                  s3:ExistingObjectTag/visibility: public
+            - !Ref AWS::NoValue
           # The frontend distribution is managed outside this stack; its ID is
           # the same literal the cache-invalidation worker is scoped to. Its
           # private-media/* behavior requires PrivateMediaKeyGroup, so this read

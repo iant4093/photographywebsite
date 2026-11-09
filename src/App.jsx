@@ -25,6 +25,7 @@ const Explore = lazy(() => import('./pages/Explore'))
 const Editor = lazy(() => import('./pages/Editor'))
 const TruongCam = lazy(() => import('./pages/TruongCam'))
 const PhotoApp = lazy(() => import('./pages/PhotoApp'))
+const PhotoApi = lazy(() => import('./pages/PhotoApi'))
 const DesktopApp = lazy(() => import('./pages/DesktopApp'))
 const Apps = lazy(() => import('./pages/Apps'))
 const AppComingSoon = lazy(() => import('./pages/Apps').then(module => ({ default: module.AppComingSoon })))
@@ -126,6 +127,7 @@ function App() {
                         <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
                         <Route path="/apps/truongflix" element={<DesktopApp moduleId="truongflix" />} />
                         <Route path="/apps/truongcleaner" element={<DesktopApp moduleId="truongcleaner" />} />
+                        <Route path="/apps/photo-api" element={<PhotoApi />} />
                         <Route path="/stats" element={<Stats />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />
                         <Route path="/video/:albumId" element={<VideoGallery />} />

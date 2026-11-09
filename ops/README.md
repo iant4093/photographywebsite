@@ -36,6 +36,7 @@ dry-run by default. Apply requires the guard values printed by the dry run
 | --- | --- |
 | [`CI_CD.md`](CI_CD.md) | `main` release workflow, manual redeploys, OIDC bootstrap, release guards |
 | [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md) | Same-origin API, origin verification, WAF, rotation, rollback |
+| [`PHOTO_API.md`](PHOTO_API.md) | Dedicated public photo endpoint, catalog publisher, and traffic controls |
 | [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md) | Signed-cookie delivery of protected album media |
 | [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) | Isolated print-store origin and manual print-file delivery |
 | [`PHOTO_ORIGINAL_COMPARISONS.md`](PHOTO_ORIGINAL_COMPARISONS.md) | Drive original matching and private Before/After previews |

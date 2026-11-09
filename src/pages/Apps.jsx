@@ -43,6 +43,11 @@ function AppArt({ id }) {
                     <circle cx="92" cy="80" r="49" />
                     <path d="M92 31v49l-34 35m34-35h49M108 47a36 36 0 0 1 20 19M156 54h46m-46 26h36m-36 26h46" />
                 </svg>
+            ) : id === 'photo-api' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <rect x="29" y="27" width="182" height="106" rx="2" />
+                    <path d="m92 62-23 18 23 18m56-36 23 18-23 18m-17-45-22 54" />
+                </svg>
             ) : (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <path d="M34 53h42l12-19h64l12 19h42v79H34V53Z" />

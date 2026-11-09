@@ -21,6 +21,7 @@ if command -v cfn-lint >/dev/null 2>&1; then
     ops/security_backup_replica_template.yaml \
     ops/security_budget_template.yaml \
     ops/observability_template.yaml \
+    ops/photo_api_template.yaml \
     ops/waf_front_door_template.yaml
 else
   for template in \
@@ -34,6 +35,7 @@ else
     ops/security_backup_replica_template.yaml \
     ops/security_budget_template.yaml \
     ops/observability_template.yaml \
+    ops/photo_api_template.yaml \
     ops/waf_front_door_template.yaml; do
     sam validate --lint --template-file "$template"
   done
@@ -47,6 +49,7 @@ fi
 if [[ -f backend/preview_worker/contract.test.mjs ]]; then
   node --test backend/preview_worker/*.test.mjs
 fi
+node --test ops/tests/photo_api_selector.test.mjs
 
 if [[ "${1:-}" == "--build" ]]; then
   (

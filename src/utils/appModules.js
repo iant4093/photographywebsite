@@ -50,4 +50,11 @@ export const APP_MODULES = Object.freeze([
         detail: 'See what takes up space on your Mac and review what you can clean.',
         summary: 'Storage cleaner for Mac',
     },
+    {
+        id: 'photo-api',
+        path: '/apps/photo-api',
+        title: 'Photo API',
+        detail: 'Request a random full-resolution photo from the public galleries.',
+        summary: 'Public photo API for developers',
+    },
 ])

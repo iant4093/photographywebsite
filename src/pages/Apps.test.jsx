@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import TruongCam from './TruongCam'
 import PhotoApp from './PhotoApp'
+import PhotoApi from './PhotoApi'
 import DesktopApp from './DesktopApp'
 import Apps, { AppComingSoon } from './Apps'
 import DocumentMetadata from '../components/DocumentMetadata'
@@ -20,6 +21,7 @@ function renderApps(path = '/apps') {
                 <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
                 <Route path="/apps/truongflix" element={<DesktopApp moduleId="truongflix" />} />
                 <Route path="/apps/truongcleaner" element={<DesktopApp moduleId="truongcleaner" />} />
+                <Route path="/apps/photo-api" element={<PhotoApi />} />
             </Routes>
         </MemoryRouter>,
     )
@@ -40,9 +42,20 @@ describe('Apps navigation', () => {
         renderApps()
         expect(screen.getByRole('heading', { name: 'Apps' })).toBeInTheDocument()
         const modules = screen.getByRole('region', { name: 'Apps' })
-        expect(within(modules).getAllByRole('link')).toHaveLength(7)
+        expect(within(modules).getAllByRole('link')).toHaveLength(8)
         fireEvent.click(within(modules).getByRole('link', { name: /Web Editor/ }))
         expect(screen.getByRole('heading', { name: 'Existing photo editor' })).toBeInTheDocument()
+    })
+
+    it('opens the Photo API reference with the public endpoint and selection rules', () => {
+        renderApps()
+        fireEvent.click(screen.getByRole('link', { name: /Photo API/ }))
+        expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Photo API')
+        expect(screen.getByRole('link', { name: /Open the endpoint/ })).toHaveAttribute(
+            'href', 'https://photos-api.iantruongphotography.com/v1/photos/random',
+        )
+        expect(screen.getByText(/If it has none, pick from all its photos/)).toBeInTheDocument()
+        expect(document.title).toBe('Photo API | Ian Truong Photography')
     })
 
     it.each(['TruongRoom'])('opens %s, then returns to the modules', title => {
