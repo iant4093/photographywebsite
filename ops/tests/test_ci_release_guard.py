@@ -379,6 +379,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "GetDownloadUrlFunctionRole",
                 "GetSharedAlbumFunctionRole",
                 "GetAdminAlbumMediaFunctionRole",
+                "GetAuditLogFunctionRole",
                 "GetPublicAlbumFunctionRole",
                 "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",

@@ -587,7 +587,11 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Path: /admin/audit-log", audit)
         self.assertIn("APPLICATION_LOG_GROUP: !Ref ApplicationLogGroup", audit)
         self.assertIn("Action: logs:StartQuery", audit)
-        self.assertIn("Resource: !GetAtt ApplicationLogGroup.Arn", audit)
+        self.assertIn("- !GetAtt ApplicationLogGroup.Arn", audit)
+        self.assertIn(
+            "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApplicationLogGroup}'",
+            audit,
+        )
         self.assertIn("Action: logs:GetQueryResults", audit)
         self.assertNotIn("logs:*", audit)
 

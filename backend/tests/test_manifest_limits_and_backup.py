@@ -87,7 +87,7 @@ class AlbumManifestSizeGuardTests(unittest.TestCase):
     def _create(self, images):
         table = Mock()
         body = {
-            "albumId": ALBUM_ID, "type": "photo", "visibility": "public", "title": "Album",
+            "albumId": ALBUM_ID, "type": "photo", "visibility": "public", "title": "Album", "category": "Tests",
             "createdAt": "2026-01-01T00:00:00Z", "images": images,
         }
         with patch.dict(os.environ, SMALL_BUDGET), patch.object(create_album, "require_admin", return_value=None), patch.object(

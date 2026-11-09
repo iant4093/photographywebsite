@@ -78,6 +78,11 @@ function Upload() {
         e.preventDefault()
         setError('')
         setSuccess(false)
+        const albumCategory = category.trim()
+        if (!albumCategory) {
+            setError('Enter a category before uploading.')
+            return
+        }
         const scheduling = visibility === 'public' && scheduled
         if (scheduling && publishScheduleError(publishValue)) {
             setError(publishScheduleError(publishValue))
@@ -110,7 +115,7 @@ function Upload() {
                 uploadRequestId: albumId,
                 title,
                 description,
-                category: category || 'Uncategorized',
+                category: albumCategory,
                 coverImageUrl: coverImageUrlPublic,
                 coverThumbKey: coverThumbUrlPublic,
                 coverBlurhash: coverBlurhash,
@@ -288,8 +293,8 @@ function Upload() {
 
                     {/* Category input */}
                     <div className="mb-6">
-                        <label htmlFor="category" className="block text-sm font-medium text-charcoal mb-2">Category</label>
-                        <SiteSelect editable aria-label="Category"
+                        <label htmlFor="category" className="block text-sm font-medium text-charcoal mb-2">Category *</label>
+                        <SiteSelect editable required maxLength={100} aria-label="Category"
                             id="category"
                             value={category}
                             onChange={(value) => setCategory(value)}

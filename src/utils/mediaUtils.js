@@ -1,7 +1,8 @@
 import { encode } from 'blurhash'
-import { validateDimensions } from '../editor/decodeSafety'
 
 const THUMBNAIL_MAX_SIZE = 800
+const PHOTO_THUMBNAIL_MAX_PIXELS = 250_000_000
+const VIDEO_THUMBNAIL_MAX_PIXELS = 100_000_000
 const THUMBNAIL_MIME_TYPE = 'image/jpeg'
 const THUMBNAIL_QUALITY = 0.85
 const BLURHASH_SIZE = 32
@@ -9,9 +10,12 @@ const VIDEO_DECODE_TIMEOUT_MS = 30_000
 
 export const VIDEO_DECODE_ERROR_MESSAGE = 'This video codec cannot be decoded by your browser. Export the video as H.264 MP4 and try again.'
 
-function scaledDimensions(sourceWidth, sourceHeight) {
-    if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth < 1 || sourceHeight < 1) {
+function scaledDimensions(sourceWidth, sourceHeight, maxPixels) {
+    if (!Number.isSafeInteger(sourceWidth) || !Number.isSafeInteger(sourceHeight) || sourceWidth < 1 || sourceHeight < 1) {
         throw new Error('Media has no usable dimensions')
+    }
+    if (sourceWidth > 32767 || sourceHeight > 32767 || sourceWidth * sourceHeight > maxPixels) {
+        throw new Error(`Media exceeds the thumbnail preparation limit of ${maxPixels / 1_000_000} megapixels or 32,767 pixels per side.`)
     }
 
     const scale = Math.min(1, THUMBNAIL_MAX_SIZE / Math.max(sourceWidth, sourceHeight))
@@ -27,9 +31,8 @@ function canvasContext(canvas) {
     return context
 }
 
-function renderThumbnailCanvas(source, sourceWidth, sourceHeight) {
-    const { width, height } = scaledDimensions(sourceWidth, sourceHeight)
-    validateDimensions(sourceWidth, sourceHeight)
+function renderThumbnailCanvas(source, sourceWidth, sourceHeight, maxPixels) {
+    const { width, height } = scaledDimensions(sourceWidth, sourceHeight, maxPixels)
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
@@ -59,8 +62,10 @@ function jpegBlob(canvas) {
     })
 }
 
-async function renderThumbnail(source, sourceWidth, sourceHeight, { tolerateBlurhashFailure = false } = {}) {
-    const canvas = renderThumbnailCanvas(source, sourceWidth, sourceHeight)
+async function renderThumbnail(source, sourceWidth, sourceHeight, {
+    maxPixels = VIDEO_THUMBNAIL_MAX_PIXELS, tolerateBlurhashFailure = false,
+} = {}) {
+    const canvas = renderThumbnailCanvas(source, sourceWidth, sourceHeight, maxPixels)
     let blurhash = null
     try {
         blurhash = blurhashFromCanvas(canvas)
@@ -98,8 +103,10 @@ export async function processImage(file, { signal, timeoutMs = 30_000 } = {}) {
         image.onload = async () => {
             if (settled) return
             try {
-                const { width, height } = image
-                const result = await renderThumbnail(image, width, height)
+                const { naturalWidth: width, naturalHeight: height } = image
+                // Thumbnail preparation draws directly to an 800px canvas.
+                // Keep a decode bound in sync with the photo preview worker.
+                const result = await renderThumbnail(image, width, height, { maxPixels: PHOTO_THUMBNAIL_MAX_PIXELS })
                 finish(null, { ...result, width, height })
             } catch (error) {
                 finish(error)

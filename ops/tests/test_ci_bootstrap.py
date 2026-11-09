@@ -964,7 +964,10 @@ fi
             'Sid': 'UpdateExactSecurityEventMetricFilters',
             'Effect': 'Allow',
             'Action': ['logs:DeleteMetricFilter', 'logs:PutMetricFilter'],
-            'Resource': {'Fn::Sub': 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'},
+            'Resource': [
+                {'Fn::Sub': 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'},
+                {'Fn::Sub': 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod'},
+            ],
         })
 
     def test_security_notification_alarm_grant_is_limited_to_exact_alarms(self):

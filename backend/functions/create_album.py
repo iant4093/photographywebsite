@@ -145,7 +145,7 @@ def handler(event, context):
         visibility = validate_visibility(body.get("visibility"), default="public")
         title = require_string(body.get("title"), "title", maximum=200)
         description = optional_string(body.get("description"), "description", maximum=5000)
-        category = optional_string(body.get("category"), "category", maximum=100, default="Uncategorized") or "Uncategorized"
+        category = require_string(body.get("category"), "category", maximum=100)
         created_at = _validate_created_at(body.get("createdAt"))
         images = _normalize_images(body.get("images"), album_id, album_type)
         backup_to_drive = validate_bool(body.get("backupToGoogleDrive"), "backupToGoogleDrive")

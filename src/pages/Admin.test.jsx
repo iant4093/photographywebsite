@@ -175,15 +175,27 @@ describe('Admin photo upload', () => {
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
     await waitFor(() => expect(api.fetchAllAlbums).toHaveBeenCalled())
-    populate(container, [new File(['one'], 'Cover.png', { type: 'image/png' })], { category: '' })
+    const file = new File(['one'], 'Cover.png', { type: 'image/png' })
+    media.processImage.mockResolvedValueOnce({
+      thumbnail: new Blob(['thumb'], { type: 'image/jpeg' }), blurhash: 'LEHASH', width: 16000, height: 12000,
+    })
+    populate(container, [file], { category: '   ' })
+    const category = screen.getByRole('combobox', { name: 'Category' })
+    expect(category).toBeRequired()
+    fireEvent.submit(container.querySelector('form'))
+    expect(screen.getByText('Enter a category before uploading.')).toBeInTheDocument()
+    expect(api.requestUploadUrls).not.toHaveBeenCalled()
+    fireEvent.change(category, { target: { value: '  Travel  ' } })
     fireEvent.submit(container.querySelector('form'))
 
     expect(await screen.findByText('Link Only album created successfully!')).toBeInTheDocument()
     expect(screen.getByText(`${window.location.origin}/sharedalbum/share-123`)).toBeInTheDocument()
+    expect(api.uploadFileToS3).toHaveBeenCalledWith('https://upload.test', file, {}, expect.any(Object))
     expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
-      category: 'Uncategorized', visibility: 'unlisted', ownerEmail: '', isShared: true,
+      category: 'Travel', visibility: 'unlisted', ownerEmail: '', isShared: true,
       coverImageUrl: 'albums/12345678-abcd-4567-8901-123456789012/original/server.jpg',
       coverThumbKey: 'albums/12345678-abcd-4567-8901-123456789012/thumbnail/server.jpg',
+      images: [expect.objectContaining({ width: 16000, height: 12000 })],
     }))
   })
 

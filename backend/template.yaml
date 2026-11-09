@@ -5094,7 +5094,9 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: logs:StartQuery
-              Resource: !GetAtt ApplicationLogGroup.Arn
+              Resource:
+                - !GetAtt ApplicationLogGroup.Arn
+                - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApplicationLogGroup}'
             # A Logs Insights query ID has no IAM resource ARN. Results are
             # parsed through a strict privacy-safe audit-event allowlist.
             - Effect: Allow

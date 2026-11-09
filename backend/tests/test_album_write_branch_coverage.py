@@ -155,6 +155,20 @@ class CreateAlbumBranchTests(unittest.TestCase):
         self.assertNotIn("ownerSub", public_item)
         self.assertEqual(table.update_item.call_count, 2)
 
+    def test_creation_requires_a_category_for_photos_and_videos(self):
+        for album_type in ("photo", "video"):
+            for category in (None, "", "   "):
+                with self.subTest(album_type=album_type, category=category):
+                    body = create_body(type=album_type)
+                    if category is None:
+                        del body["category"]
+                    else:
+                        body["category"] = category
+                    response, table, _ = self._run_success(body)
+                    self.assertEqual(response["statusCode"], 400)
+                    self.assertIn("category", json.loads(response["body"])["error"])
+                    table.put_item.assert_not_called()
+
     def test_unlisted_share_code_and_private_notification_success_and_failure(self):
         with patch.object(create_album.secrets, "token_urlsafe", return_value="share-code"):
             response, table, _ = self._run_success(create_body(visibility="unlisted", isShared=True))

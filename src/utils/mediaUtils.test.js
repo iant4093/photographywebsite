@@ -32,15 +32,15 @@ describe('client media processing', () => {
     class ImageStub {
       set src(value) {
         if (!value) return
-        this.width = 1600
-        this.height = 1200
+        this.naturalWidth = 16000
+        this.naturalHeight = 12000
         expect(value).toBe(createdUrl)
         queueMicrotask(() => this.onload?.())
       }
     }
     vi.stubGlobal('Image', ImageStub)
     const result = await processImage(new File(['raw'], 'photo.jpg', { type: 'image/jpeg' }))
-    expect(result).toMatchObject({ width: 1600, height: 1200, blurhash: expect.any(String) })
+    expect(result).toMatchObject({ width: 16000, height: 12000, blurhash: expect.any(String) })
     expect(result.thumbnail).toBeInstanceOf(Blob)
     expect(drawImage).toHaveBeenCalledWith(expect.any(ImageStub), 0, 0, 800, 600)
     expect(encode).toHaveBeenCalled()
@@ -50,7 +50,7 @@ describe('client media processing', () => {
   it.each([[1, 32000], [32000, 1], [1, 1], [1200, 2400], [800, 800]])('bounds placeholder work for %s by %s without changing source dimensions', async (width, height) => {
     const { getImageData } = installCanvas()
     class ImageStub {
-      set src(value) { this.width = width; this.height = height; if (value) queueMicrotask(() => this.onload?.()) }
+      set src(value) { this.naturalWidth = width; this.naturalHeight = height; if (value) queueMicrotask(() => this.onload?.()) }
     }
     vi.stubGlobal('Image', ImageStub)
     const result = await processImage(new File(['raw'], 'portrait.jpg', { type: 'image/jpeg' }))
@@ -70,7 +70,7 @@ describe('client media processing', () => {
 
     installCanvas()
     class EmptyImage {
-      set src(value) { this.width = 0; this.height = 10; if (value) queueMicrotask(() => this.onload?.()) }
+      set src(value) { this.naturalWidth = 0; this.naturalHeight = 10; if (value) queueMicrotask(() => this.onload?.()) }
     }
     vi.stubGlobal('Image', EmptyImage)
     await expect(processImage(new Blob())).rejects.toThrow('no usable dimensions')
@@ -78,7 +78,7 @@ describe('client media processing', () => {
     vi.restoreAllMocks()
     installCanvas({ context: false })
     class ValidImage {
-      set src(value) { this.width = 10; this.height = 10; if (value) queueMicrotask(() => this.onload?.()) }
+      set src(value) { this.naturalWidth = 10; this.naturalHeight = 10; if (value) queueMicrotask(() => this.onload?.()) }
     }
     vi.stubGlobal('Image', ValidImage)
     await expect(processImage(new Blob())).rejects.toThrow('Canvas rendering is unavailable')
@@ -182,7 +182,7 @@ describe('photo preparation lifetime', () => {
     vi.useFakeTimers()
     URL.createObjectURL = vi.fn(() => 'blob:deadline')
     URL.revokeObjectURL = vi.fn()
-    vi.stubGlobal('Image', class { constructor() { image = this; this.width = 100; this.height = 100 } })
+    vi.stubGlobal('Image', class { constructor() { image = this; this.naturalWidth = 100; this.naturalHeight = 100 } })
   })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
   it('times out a decoder that never responds and releases its URL', async () => {
@@ -210,8 +210,8 @@ describe('photo preparation lifetime', () => {
     const controller = new AbortController(); controller.abort()
     await expect(processImage(new Blob(), { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
     expect(URL.createObjectURL).not.toHaveBeenCalled()
-    const result = processImage(new Blob()); image.width = 1000000
-    const rejected = expect(result).rejects.toThrow()
+    const result = processImage(new Blob()); image.naturalWidth = 20000; image.naturalHeight = 15000
+    const rejected = expect(result).rejects.toThrow('250 megapixels')
     await image.onload(); await rejected
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })

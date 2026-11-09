@@ -121,12 +121,21 @@ describe('UploadVideo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
     const file = new File(['film'], 'clip.mp4', { type: 'video/mp4' })
     populate(container, [file], { category: '' })
+    const category = screen.getByRole('combobox', { name: 'Category' })
+    expect(category).toBeRequired()
+    fireEvent.submit(container.querySelector('form'))
+    expect(api.requestUploadUrls).not.toHaveBeenCalled()
+    fireEvent.change(category, { target: { value: '   ' } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(screen.getByText('Enter a category before uploading.')).toBeInTheDocument()
+    expect(api.requestUploadUrls).not.toHaveBeenCalled()
+    fireEvent.change(category, { target: { value: '  Weddings  ' } })
     fireEvent.submit(container.querySelector('form'))
 
     expect(await screen.findByText('Link Only video album created successfully!')).toBeInTheDocument()
     expect(screen.getByText(`${window.location.origin}/sharedalbum/film-share`)).toBeInTheDocument()
     expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
-      category: 'Uncategorized', visibility: 'unlisted', ownerEmail: '', isShared: true,
+      category: 'Weddings', visibility: 'unlisted', ownerEmail: '', isShared: true,
       coverImageUrl: 'albums/87654321-abcd-4567-8901-123456789012/thumbnail/server.jpg',
       images: [expect.objectContaining({ rawKey: 'albums/87654321-abcd-4567-8901-123456789012/original/server.jpg' })],
     }))

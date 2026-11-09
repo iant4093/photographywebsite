@@ -100,7 +100,7 @@ class RecoveryFollowupTests(unittest.TestCase):
         stack.enter_context(patch.object(create_album, 'get_caller_claims', return_value={'sub': SUB}))
         stack.enter_context(patch.object(create_album, 'serialize_album_summary', side_effect=lambda value, **_: {'albumId': value['albumId']}))
         images = RECORD['images'] if kind == 'photo' else [{'rawKey': f'albums/{ALBUM}/original/{n}.mp4'} for n in range(2)]
-        return {'body': json.dumps({'albumId': ALBUM, 'uploadRequestId': '33333333-3333-4333-8333-333333333333', 'type': kind, 'visibility': 'public', 'title': 'Synthetic', 'createdAt': '2026-09-22T00:00:00Z', 'images': images})}
+        return {'body': json.dumps({'albumId': ALBUM, 'uploadRequestId': '33333333-3333-4333-8333-333333333333', 'type': kind, 'visibility': 'public', 'title': 'Synthetic', 'category': 'Tests', 'createdAt': '2026-09-22T00:00:00Z', 'images': images})}
 
     def test_new_album_recovers_preview_failure_without_recreating_album(self):
         with ExitStack() as stack:

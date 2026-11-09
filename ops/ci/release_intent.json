@@ -338,7 +338,7 @@
     {"logicalId": "GetPhotographyStatsFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Tags"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "GetGitHubAnalyticsFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Tags"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "GetSiteHealthFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Tags"], "allowNoDetails": false, "allowProtectedModify": true},
-    {"logicalId": "GetAuditLogFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Tags"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "GetAuditLogFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies", "Tags"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "RefreshGitHubAnalyticsFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Tags"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "PreTokenGenerationFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Tags"], "allowNoDetails": false, "allowProtectedModify": true}
   ]

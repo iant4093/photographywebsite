@@ -8,11 +8,11 @@ import { PREVIEW_WIDTHS } from './contract.mjs'
 const albumId = '11111111-1111-4111-8111-111111111111'
 const rawKey = `albums/${albumId}/original/synthetic.jpg`
 
-async function fixture(t, visibility) {
+async function fixture(t, visibility, { width = 1920, height = 1280 } = {}) {
     const env = { ...process.env }
     Object.assign(process.env, { AWS_REGION: 'us-west-2', IMAGES_BUCKET: 'synthetic-bucket', ALBUMS_TABLE: 'synthetic-albums', PREVIEW_METADATA_TABLE: 'synthetic-previews', MEDIA_MUTATION_PROTOCOL: '1' })
     t.after(() => { for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key]; Object.assign(process.env, env) })
-    const source = await sharp({ create: { width: 1920, height: 1280, channels: 3, background: '#335566' } }).jpeg().toBuffer()
+    const source = await sharp({ create: { width, height, channels: 3, background: '#335566' } }).jpeg().toBuffer()
     const objects = new Map([[rawKey, { bytes: source, ContentType: 'image/jpeg', Metadata: {}, tags: [{ Key: 'visibility', Value: visibility }] }]])
     let metadata = null
     const album = { albumId, status: 'active', visibility, type: 'photo', images: [{ rawKey }] }
@@ -75,4 +75,12 @@ for (const visibility of ['public', 'private', 'unlisted']) test(`actual photo w
     assert.equal(f.calls.filter(c => c.type === 'GetObjectCommand' && c.key === rawKey).length, reads)
     assert.equal(f.leases.filter(c => c.UpdateExpression.startsWith('SET')).length, 3)
     assert.equal(f.leases.filter(c => c.UpdateExpression.startsWith('REMOVE')).length, 3)
+})
+
+test('generates previews when the only photo is a 192-megapixel JPEG', async t => {
+    const f = await fixture(t, 'public', { width: 16000, height: 12000 })
+    assert.deepEqual(await f.run(), { batchItemFailures: [] })
+    const metadata = f.metadata()
+    assert.equal(metadata.status, 'ready')
+    assert.deepEqual(Object.keys(metadata.previewKeys), PREVIEW_WIDTHS.map(String))
 })

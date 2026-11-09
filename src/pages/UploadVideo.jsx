@@ -143,6 +143,11 @@ export default function UploadVideo() {
         e.preventDefault()
         setError('')
         setSuccess(false)
+        const albumCategory = category.trim()
+        if (!albumCategory) {
+            setError('Enter a category before uploading.')
+            return
+        }
         const scheduling = visibility === 'public' && scheduled
         if (scheduling && publishScheduleError(publishValue)) {
             setError(publishScheduleError(publishValue))
@@ -182,7 +187,7 @@ export default function UploadVideo() {
                 type: 'video', // Indicates backend should kick off MediaConvert
                 title,
                 description,
-                category: category || 'Uncategorized',
+                category: albumCategory,
                 coverImageUrl: coverThumbUrlPublic, // The poster image basically
                 coverThumbKey: coverThumbUrlPublic,
                 coverBlurhash: coverBlurhash,
@@ -320,8 +325,9 @@ export default function UploadVideo() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <div>
-                            <label className="block text-sm font-medium text-charcoal mb-2">Category</label>
-                            <SiteSelect editable aria-label="Category"
+                            <label htmlFor="category" className="block text-sm font-medium text-charcoal mb-2">Category *</label>
+                            <SiteSelect editable required maxLength={100} aria-label="Category"
+                                id="category"
                                 value={category}
                                 onChange={(value) => setCategory(value)}
                                 className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"

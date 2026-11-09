@@ -84,6 +84,8 @@ const documentClient = boundedClient(DynamoDBDocumentClient.from(new DynamoDBCli
 }))
 const MAX_SOURCE_BYTES = parsePositiveLimit(process.env.MAX_PREVIEW_SOURCE_BYTES, 100 * 1024 * 1024, 250 * 1024 * 1024)
 const MAX_OUTPUT_BYTES = parsePositiveLimit(process.env.MAX_PREVIEW_OUTPUT_BYTES, 20 * 1024 * 1024, 50 * 1024 * 1024)
+// Match the photo upload thumbnail limit. Hero processing has its own bounds.
+const MAX_PHOTO_SOURCE_PIXELS = 250_000_000
 
 function requiredEnvironment(name) {
     const value = process.env[name]?.trim()
@@ -136,7 +138,7 @@ async function readObjectBounded(key, maximumBytes) {
 }
 
 async function generateOutputs(sourceBytes) {
-    const source = sharp(sourceBytes, { failOn: 'warning', limitInputPixels: 100_000_000 }).rotate()
+    const source = sharp(sourceBytes, { failOn: 'warning', limitInputPixels: MAX_PHOTO_SOURCE_PIXELS }).rotate()
     const metadata = await source.metadata()
     if (!SUPPORTED_SOURCE_TYPES.has(`image/${metadata.format}`)) throw new Error('Unsupported source image type')
     if (!metadata.width || metadata.width < Math.max(...PREVIEW_WIDTHS)) {
@@ -145,7 +147,7 @@ async function generateOutputs(sourceBytes) {
 
     const outputs = {}
     for (const width of PREVIEW_WIDTHS) {
-        const bytes = await sharp(sourceBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
+        const bytes = await sharp(sourceBytes, { failOn: 'warning', limitInputPixels: MAX_PHOTO_SOURCE_PIXELS })
             .rotate()
             .toColourspace('srgb')
             .resize({ width, withoutEnlargement: true })
@@ -162,7 +164,7 @@ async function generateOutputs(sourceBytes) {
 }
 
 async function extractExploreMetadata(imageBytes, image) {
-    const { data, info } = await sharp(imageBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
+    const { data, info } = await sharp(imageBytes, { failOn: 'warning', limitInputPixels: MAX_PHOTO_SOURCE_PIXELS })
         .rotate()
         .toColourspace('srgb')
         .resize({ width: 64, height: 64, fit: 'inside', withoutEnlargement: true })
