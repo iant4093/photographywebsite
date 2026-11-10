@@ -64,6 +64,8 @@ beforeEach(() => {
   api.prefetchPublicAlbum.mockReset().mockResolvedValue({ images: [] })
 })
 
+afterEach(clearCatalogSnapshots)
+
 function gallery(ui, path, navigateTo) {
   return render(
     <MemoryRouter initialEntries={['/previous', path]} initialIndex={1}>
