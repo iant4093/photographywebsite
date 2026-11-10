@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import datetime as dt
 import logging
 
@@ -15,6 +14,7 @@ from response_helpers import error_response, json_response
 
 logger = logging.getLogger("photography_api.github_analytics_api")
 logger.setLevel(logging.INFO)
+ALL_REPOSITORIES = "all"
 
 
 def _cache_status(report):
@@ -30,6 +30,11 @@ def _next_refresh():
     return (now.replace(minute=20, second=0, microsecond=0) + dt.timedelta(hours=1 if now.minute >= 20 else 0)).isoformat().replace("+00:00", "Z")
 
 
+def _snapshot(repository):
+    report = load_cached_report(repository)
+    return {**report, "cacheStatus": _cache_status(report)} if report is not None else None
+
+
 def handler(event, context):
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
@@ -37,16 +42,23 @@ def handler(event, context):
     denied = require_admin(event)
     if denied:
         return denied
+    selection = (event.get("queryStringParameters") or {}).get("repo")
     try:
-        repository = validate_repository((event.get("queryStringParameters") or {}).get("repo"))
+        repository = ALL_REPOSITORIES if selection == ALL_REPOSITORIES else validate_repository(selection)
     except ValueError:
         return error_response(400, "Choose a supported GitHub repository.", code="invalid_repository")
     try:
-        report = load_cached_report(repository)
-        if report is None:
+        if repository == ALL_REPOSITORIES:
+            reports = {name: report for name in REPOSITORIES if (report := _snapshot(name)) is not None}
+            result = {"reports": reports} if reports else None
+            status = "partial" if len(reports) < len(REPOSITORIES) else (
+                "stale" if any(report["cacheStatus"] == "stale" for report in reports.values()) else "fresh"
+            )
+        else:
+            result = _snapshot(repository)
+            status = result["cacheStatus"] if result is not None else "partial"
+        if result is None:
             return error_response(503, "The GitHub analytics snapshot is being prepared. Please try again shortly.", code="github_analytics_preparing")
-        status = _cache_status(report)
-        result = copy.deepcopy(report)
         result["repositories"] = [
             {"name": name, "fullName": f"{OWNER}/{name}", "label": config["label"]}
             for name, config in REPOSITORIES.items()
@@ -64,7 +76,7 @@ def handler(event, context):
             context=context,
             actor_type=actor_type,
             auth_method=auth_method,
-            severity="warning" if status == "stale" else "info",
+            severity="info" if status == "fresh" else "warning",
         )
         return json_response(200, result)
     except Exception as error:

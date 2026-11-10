@@ -47,7 +47,10 @@ REPOSITORIES = {
     "TruongNoiser": {"branch": "main", "label": "TruongNoiser"},
     # Bundled Core ML weights exceed the ZIP limit; fetch only counted sources.
     "TruongScaler": {"branch": "main", "label": "TruongScaler", "source": "tree"},
+    "TruongFlix": {"branch": "main", "label": "TruongFlix"},
+    "TruongCleaner": {"branch": "main", "label": "TruongCleaner"},
 }
+_NATIVE_AREAS = {"TruongFlix": "Desktop App", "TruongCleaner": "macOS App"}
 API_BASE = "https://api.github.com"
 ARCHIVE_BASE = "https://codeload.github.com"
 
@@ -59,7 +62,7 @@ _SOURCE_EXTENSIONS = {
     ".js": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",
     ".ts": "TypeScript", ".tsx": "TypeScript", ".py": "Python", ".css": "CSS",
     ".scss": "SCSS", ".html": "HTML", ".sh": "Shell", ".yaml": "YAML", ".yml": "YAML",
-    ".json": "JSON", ".toml": "TOML", ".swift": "Swift",
+    ".json": "JSON", ".toml": "TOML", ".swift": "Swift", ".rs": "Rust",
 }
 _EXCLUDED_PARTS = {
     ".git", ".aws-sam", "node_modules", "dist", "build", "coverage", "vendor",
@@ -268,13 +271,15 @@ def _activity(payload, previous):
     return {"status": "ready", "weeks": weeks}
 
 
-def _source_area(path):
+def _source_area(path, repository=None):
     normalized = path.lower()
     name = normalized.rsplit("/", 1)[-1]
     if any(part.endswith("tests") for part in normalized.split("/")[:-1]) or ".test." in name or name.startswith("test_") or name.endswith("_test.py"):
         return "Tests"
     if normalized.endswith(".swift"):
-        return "iPhone App"
+        return _NATIVE_AREAS.get(repository, "iPhone App")
+    if repository == "TruongFlix" and normalized.startswith("src-tauri/"):
+        return _NATIVE_AREAS[repository]
     if normalized.startswith("src/"):
         return "Frontend"
     if normalized.startswith("ops/") or normalized.startswith(".github/") or normalized in {"backend/template.yaml", "backend/makefile"}:
@@ -294,8 +299,9 @@ def _source_extension(path):
     return None
 
 
-def _summarize_sources(sha, sources):
-    areas = {name: 0 for name in ("Frontend", "Backend", "iPhone App", "Infrastructure & Ops", "Tests", "Other")}
+def _summarize_sources(sha, sources, repository):
+    native_area = _NATIVE_AREAS.get(repository, "iPhone App")
+    areas = {name: 0 for name in ("Frontend", "Backend", native_area, "Infrastructure & Ops", "Tests", "Other")}
     languages = {}
     files = 0
     for relative, content in sources:
@@ -305,7 +311,7 @@ def _summarize_sources(sha, sources):
         if not nonblank:
             continue
         files += 1
-        areas[_source_area(relative)] += nonblank
+        areas[_source_area(relative, repository)] += nonblank
         language = _source_extension(relative)[1]
         languages[language] = languages.get(language, 0) + nonblank
     return {
@@ -374,7 +380,7 @@ def _count_source_tree(sha, repository):
         return path, content
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        return _summarize_sources(sha, executor.map(fetch_source, sources))
+        return _summarize_sources(sha, executor.map(fetch_source, sources), repository)
 
 
 def _count_archive(sha, repository=None):
@@ -412,7 +418,7 @@ def _count_archive(sha, repository=None):
 
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            return _summarize_sources(sha, source_files(archive))
+            return _summarize_sources(sha, source_files(archive), repository)
     except (zipfile.BadZipFile, RuntimeError):
         raise ProviderContractError("GitHub archive was invalid") from None
 

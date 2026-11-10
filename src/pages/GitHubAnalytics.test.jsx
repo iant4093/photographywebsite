@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,7 +39,7 @@ describe('GitHub analytics admin page', () => {
     expect(api.fetchGitHubAnalytics).toHaveBeenCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'photographywebsite' })
   })
 
-  it.each(['TruongCam', 'TruongNoiser', 'TruongScaler'])('switches to %s and defaults to the website on every fresh visit', async (repository) => {
+  it.each(['TruongCam', 'TruongNoiser', 'TruongScaler', 'TruongFlix', 'TruongCleaner'])('switches to %s and defaults to the website on every fresh visit', async (repository) => {
     const first = render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
     await screen.findByText('24,000')
     api.fetchGitHubAnalytics.mockResolvedValueOnce({ ...REPORT, repository: { ...REPORT.repository, fullName: `iant4093/${repository}` }, loc: { ...REPORT.loc, total: 8000 } })
@@ -52,6 +52,62 @@ describe('GitHub analytics admin page', () => {
     render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
     expect(screen.getByRole('combobox', { name: 'Repository' })).toHaveValue('photographywebsite')
     await screen.findByText('24,000')
+  })
+
+  it('combines available snapshots and lets admins open individual repositories', async () => {
+    const cleaner = {
+      ...REPORT,
+      cacheStatus: 'stale',
+      repository: { ...REPORT.repository, fullName: 'iant4093/TruongCleaner' },
+      totalCommits: 68, commits30d: 5,
+      loc: { total: 8000, files: 50, areas: [{ name: 'macOS App', lines: 7000 }, { name: 'Tests', lines: 1000 }] },
+      workflow: { successRate: 25, successfulRuns: 1, completedRuns: 4, medianDurationSeconds: 90 },
+      languages: [{ name: 'JavaScript', bytes: 200 }, { name: 'Swift', bytes: 700 }],
+      activity: { status: 'ready', weeks: [{ week: REPORT.activity.weeks[0].week, additions: 25, deletions: 5 }] },
+      recentRuns: [{ ...REPORT.recentRuns[0], title: 'Build Cleaner', createdAt: '2026-08-26T11:00:00Z' }],
+      recentCommits: [{ ...REPORT.recentCommits[0], message: 'Ship Cleaner', date: '2026-08-26T11:00:00Z' }],
+    }
+    const names = ['photographywebsite', 'TruongCam', 'TruongNoiser', 'TruongScaler', 'TruongFlix', 'TruongCleaner']
+    render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
+    await screen.findByText('24,000')
+    api.fetchGitHubAnalytics.mockResolvedValueOnce({
+      repositories: names.map(name => ({ name, label: name === 'photographywebsite' ? 'Photography Website' : name })),
+      reports: { photographywebsite: REPORT, TruongCleaner: cleaner },
+      nextRefreshAt: REPORT.nextRefreshAt,
+    }).mockResolvedValueOnce(cleaner)
+    const picker = screen.getByRole('combobox', { name: 'Repository' })
+    selectChoice(picker, 'all')
+
+    const summary = within(await screen.findByRole('region', { name: 'All repositories summary' }))
+    expect(summary.getByText('32,000')).toBeInTheDocument()
+    expect(summary.getByText('500')).toBeInTheDocument()
+    expect(summary.getByText('87.9%')).toBeInTheDocument()
+    expect(summary.getByText('29 of 33 recent completed runs')).toBeInTheDocument()
+    expect(summary.getByText('28%')).toBeInTheDocument()
+    expect(screen.getByText('2 of 6 repository snapshots included')).toBeInTheDocument()
+    expect(screen.getByText(/stale snapshots from 1 repository/)).toBeInTheDocument()
+    expect(screen.getByText('1,200 bytes')).toBeInTheDocument()
+    expect(screen.getByText('Weekly activity is available for 2 of 6 repositories.')).toBeInTheDocument()
+    expect(screen.getByTitle(/\+145 \/ −40/)).toBeInTheDocument()
+    const recentRuns = within(screen.getByRole('region', { name: 'Recent Actions runs' })).getAllByRole('link')
+    expect(recentRuns[0]).toHaveTextContent('Build Cleaner')
+    expect(recentRuns[0]).toHaveTextContent('TruongCleaner')
+    const recentCommits = within(screen.getByRole('region', { name: 'Recent commits' })).getAllByRole('link')
+    expect(recentCommits[0]).toHaveTextContent('Ship Cleaner')
+    const comparison = within(screen.getByRole('region', { name: 'By repository' }))
+    expect(comparison.getAllByRole('listitem')).toHaveLength(6)
+    expect(comparison.getByRole('button', { name: 'TruongFlix' }).closest('li')).toHaveTextContent('Snapshot pending')
+    expect(comparison.getByRole('button', { name: 'TruongCleaner' }).closest('li')).toHaveTextContent('1m 30s')
+    expect(api.fetchGitHubAnalytics).toHaveBeenLastCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'all' })
+    selectChoice(picker, 'all')
+    expect(api.fetchGitHubAnalytics).toHaveBeenCalledTimes(2)
+    expect(comparison.getByRole('button', { name: 'TruongCleaner' })).toBeInTheDocument()
+
+    fireEvent.click(comparison.getByRole('button', { name: 'TruongCleaner' }))
+    expect(await screen.findByText('iant4093/TruongCleaner')).toBeInTheDocument()
+    expect(picker).toHaveValue('TruongCleaner')
+    expect(picker).toHaveFocus()
+    expect(api.fetchGitHubAnalytics).toHaveBeenLastCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'TruongCleaner' })
   })
 
   it('ignores a late response from the previously selected repository', async () => {

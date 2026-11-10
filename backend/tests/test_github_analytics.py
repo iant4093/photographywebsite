@@ -1,5 +1,6 @@
-import io
+import datetime as dt
 import hashlib
+import io
 import json
 from types import SimpleNamespace
 import unittest
@@ -60,7 +61,7 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["reason_code"], "fresh_report")
 
     def test_repository_selection_is_allowlisted_and_scopes_cache_reads(self):
-        self.assertEqual(set(github_analytics.REPOSITORIES), {"photographywebsite", "TruongCam", "TruongNoiser", "TruongScaler"})
+        self.assertEqual(set(github_analytics.REPOSITORIES), {"photographywebsite", "TruongCam", "TruongNoiser", "TruongScaler", "TruongFlix", "TruongCleaner"})
         for repository in github_analytics.REPOSITORIES:
             event = {**ADMIN_EVENT, "queryStringParameters": {"repo": repository}}
             with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
@@ -79,6 +80,31 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 400)
             cache.assert_not_called()
 
+    def test_all_repositories_returns_available_snapshots_with_individual_freshness(self):
+        snapshots = {
+            "photographywebsite": {**sample_report(), "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat()},
+            "TruongFlix": {**sample_report(), "generatedAt": "2000-01-01T00:00:00Z"},
+        }
+        event = {**ADMIN_EVENT, "queryStringParameters": {"repo": "all"}}
+        with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
+            get_github_analytics, "require_admin", return_value=None
+        ), patch.object(get_github_analytics, "load_cached_report", side_effect=snapshots.get) as cache, patch.object(
+            get_github_analytics, "emit_audit_event"
+        ) as audit:
+            response = get_github_analytics.handler(event, CONTEXT)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        body = response_body(response)
+        self.assertEqual([repo["name"] for repo in body["repositories"]], list(github_analytics.REPOSITORIES))
+        self.assertEqual(body["cacheStatus"], "partial")
+        self.assertEqual({name: report["cacheStatus"] for name, report in body["reports"].items()}, {
+            "photographywebsite": "fresh", "TruongFlix": "stale",
+        })
+        self.assertNotIn("cacheStatus", snapshots["TruongFlix"])
+        self.assertEqual(cache.call_args_list, [call(repo) for repo in github_analytics.REPOSITORIES])
+        audit.assert_called_once()
+        self.assertEqual(audit.call_args.kwargs["reason_code"], "partial_report")
+
     def test_missing_and_failed_cache_are_safe(self):
         common = (
             patch.object(get_github_analytics, "verify_front_door_request", return_value=None),
@@ -86,7 +112,9 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         )
         with common[0], common[1], patch.object(get_github_analytics, "load_cached_report", return_value=None):
             response = get_github_analytics.handler(ADMIN_EVENT, CONTEXT)
+            all_response = get_github_analytics.handler({**ADMIN_EVENT, "queryStringParameters": {"repo": "all"}}, CONTEXT)
         self.assertEqual(response_body(response)["code"], "github_analytics_preparing")
+        self.assertEqual(response_body(all_response)["code"], "github_analytics_preparing")
         with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
             get_github_analytics, "require_admin", return_value=None
         ), patch.object(get_github_analytics, "load_cached_report", side_effect=RuntimeError("secret")), self.assertLogs(
@@ -190,13 +218,14 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
             refresh_github_analytics.handler({"source": "untrusted"}, CONTEXT)
 
     def test_failed_repository_preserves_cache_and_does_not_block_other_refreshes(self):
+        remaining = list(github_analytics.REPOSITORIES)[1:]
         with patch.object(refresh_github_analytics, "load_cached_report", return_value=sample_report()), patch.object(
-            refresh_github_analytics, "build_report", side_effect=[RuntimeError("provider down")] + [sample_report()] * 3
+            refresh_github_analytics, "build_report", side_effect=[RuntimeError("provider down")] + [sample_report()] * len(remaining)
         ) as build, patch.object(refresh_github_analytics, "store_report") as store, self.assertLogs(level="ERROR"):
             with self.assertRaises(RuntimeError):
                 refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
-        self.assertEqual(build.call_count, 4)
-        self.assertEqual(store.call_args_list, [call(sample_report(), repository) for repository in ("TruongCam", "TruongNoiser", "TruongScaler")])
+        self.assertEqual(build.call_count, len(github_analytics.REPOSITORIES))
+        self.assertEqual(store.call_args_list, [call(sample_report(), repository) for repository in remaining])
 
     def test_cache_entries_are_independent_and_website_key_is_preserved(self):
         with patch.object(github_analytics.cache_table, "put_item") as put, patch.object(
@@ -206,7 +235,7 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
                 github_analytics.store_report(sample_report(), repository)
                 github_analytics.load_cached_report(repository)
         keys = [call.kwargs["Item"]["cacheKey"] for call in put.call_args_list]
-        self.assertEqual(keys, [github_analytics.CACHE_KEY] + [github_analytics.CACHE_KEY + f":iant4093/{repository}" for repository in ("TruongCam", "TruongNoiser", "TruongScaler")])
+        self.assertEqual(keys, [github_analytics.CACHE_KEY] + [github_analytics.CACHE_KEY + f":iant4093/{repository}" for repository in list(github_analytics.REPOSITORIES)[1:]])
         self.assertEqual([call.kwargs["Key"]["cacheKey"] for call in get.call_args_list], keys)
         self.assertEqual(github_analytics.validate_repository(), "photographywebsite")
 
@@ -218,6 +247,24 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
             self.assertEqual(github_analytics._source_area(f"Targets/{app}App/App.swift"), "iPhone App")
             self.assertEqual(github_analytics._source_area("Sources/TiledInferenceEngine/Engine.swift"), "iPhone App")
             self.assertEqual(github_analytics._source_area("Tests/TiledInferenceEngineTests/EngineTests.swift"), "Tests")
+
+    def test_counts_rust_and_swift_for_the_desktop_apps(self):
+        flix = github_analytics._summarize_sources("a" * 40, [
+            ("src-tauri/src/main.rs", b"fn main() {}\n"),
+            ("src/App.tsx", b"export default App;\n"),
+            ("tests/player.test.ts", b"test('player', play);\n"),
+        ], "TruongFlix")
+        self.assertEqual(flix["total"], 3)
+        self.assertIn({"name": "Rust", "lines": 1}, flix["languages"])
+        self.assertIn({"name": "Desktop App", "lines": 1}, flix["areas"])
+        self.assertIn({"name": "Tests", "lines": 1}, flix["areas"])
+        cleaner = github_analytics._summarize_sources("b" * 40, [
+            ("src/TruongCleaner/App.swift", b"struct CleanerApp {}\n"),
+            ("Packages/CleanerKit/Tests/CoreTests/ScanTests.swift", b"func testScan() {}\n"),
+        ], "TruongCleaner")
+        self.assertEqual(cleaner["total"], 2)
+        self.assertIn({"name": "macOS App", "lines": 1}, cleaner["areas"])
+        self.assertIn({"name": "Tests", "lines": 1}, cleaner["areas"])
 
     def test_archive_count_excludes_dependencies_locks_generated_and_blank_lines(self):
         raw = io.BytesIO()

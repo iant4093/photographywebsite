@@ -5,3 +5,21 @@
 .github-repo-picker label { color: var(--color-warm-gray); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; }
 .github-repo-picker .site-select-control { width: min(100%, 28rem); min-height: 2.8rem; padding: .65rem 2rem .65rem .85rem; border: 1px solid var(--color-warm-border); background: var(--color-cream); color: var(--color-charcoal); font-size: .85rem; }
 .github-repo-picker .site-select-control:focus-visible { outline: 2px solid var(--color-amber-dark); outline-offset: 3px; }
+
+.github-repository-list .github-overview-row { display: grid; align-items: start; }
+.github-repo-detail { color: var(--color-charcoal); font-family: var(--font-serif); font-size: 1.15rem; text-align: left; }
+.github-repo-detail:hover { color: var(--color-amber-dark); }
+.github-repo-detail:focus-visible { outline: 2px solid var(--color-amber-dark); outline-offset: 3px; }
+.github-repo-detail span { margin-left: .2rem; color: var(--color-amber-dark); }
+.github-repo-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem 1rem; }
+.github-repo-stats dt { color: var(--color-warm-gray); font-size: .7rem; }
+.github-repo-stats dd { margin-top: .15rem; color: var(--color-charcoal); font-size: .9rem; font-variant-numeric: tabular-nums; }
+
+@media (min-width: 35rem) {
+    .github-repo-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 64rem) {
+    .github-repository-list .github-overview-row { grid-template-columns: minmax(10rem, 1fr) minmax(0, 4fr); }
+    .github-repo-stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
