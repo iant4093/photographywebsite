@@ -1219,7 +1219,6 @@ function SettingsGameBoard({ images }) {
                     width={activeRound.image.width || 4}
                     height={activeRound.image.height || 3}
                     alt={`A photograph from ${activeRound.image.albumTitle}`}
-                    blurhash={activeRound.image.blurhash}
                     eager
                     className="explore-game-image"
                     style={{ aspectRatio: `${activeRound.image.width || 4} / ${activeRound.image.height || 3}` }}

@@ -863,7 +863,8 @@
   max-height: 62vh;
 }
 
-.linen-site .explore-game-photo img {
+.linen-site .explore-game-photo img,
+.linen-site .explore-game-photo .progressive-image-snapshot {
   object-fit: contain;
 }
 

@@ -390,7 +390,9 @@ describe('Explore', () => {
   it('runs a settings-guessing round and reveals the complete answer', async () => {
     render(<MemoryRouter initialEntries={['/explore/guess-settings']}><Explore /></MemoryRouter>)
     expect(await screen.findByRole('img', { name: /photograph from (Blue Mountain|Green Valley)/i })).toBeInTheDocument()
-    expect(document.querySelector('.explore-game-image')).toHaveClass('explore-game-image')
+    const gameImage = document.querySelector('.explore-game-image')
+    expect(gameImage).toHaveClass('explore-game-image')
+    expect(gameImage.querySelector('.progressive-image-placeholder')).toBeNull()
     const choices = screen.getAllByRole('button').filter(button => /^(f\/|1\/|ISO|\d+mm)/.test(button.textContent))
     expect(choices).toHaveLength(4)
     fireEvent.click(choices[0])
