@@ -1,21 +1,98 @@
+/* Scroll-linked motion: cards move as complete objects; images stay fixed. */
+.linen-site .editorial-motion-frame {
+  --editorial-x: 0;
+  --editorial-y: 0;
+  --editorial-scale: 1;
+  --editorial-rotation: 0deg;
+  --editorial-card-y: 0;
+  --editorial-card-rotation: 0deg;
+  --editorial-card-scale: 1;
+  --album-tilt-x: 0deg;
+  --album-tilt-y: 0deg;
+  transform: none;
+}
+
+.linen-site .editorial-motion-frame.is-motion-visible {
+  will-change: transform;
+}
+
+.linen-site .scroll-animate,
+.linen-site .scroll-animate.is-visible,
+.linen-site .grid-item,
+.linen-site .grid-item.is-visible {
+  opacity: 1 !important;
+  transition: none !important;
+  transform: none;
+}
+
+.linen-site .scroll-animate .stagger-child,
+.linen-site .scroll-animate.is-visible .stagger-child {
+  opacity: 1 !important;
+  animation: none !important;
+}
+
+.linen-site .editorial-motion-frame.is-motion-visible {
+  transform:
+    translate(var(--editorial-x), var(--editorial-y))
+    rotate(var(--editorial-rotation))
+    scale(var(--editorial-scale)) !important;
+}
+
+.linen-site .album-card.editorial-motion-media.is-motion-visible,
+.linen-site .linen-media-frame.editorial-motion-media.is-motion-visible,
+.linen-site [data-scroll-row] .album-card.editorial-motion-media:not(.editorial-timeline) {
+  /* Row cards retain their vertical pose through horizontal clipping. */
+  transform:
+    perspective(800px)
+    translate(var(--editorial-x), var(--editorial-card-y))
+    rotateX(var(--album-tilt-x))
+    rotateY(var(--album-tilt-y))
+    rotate(var(--editorial-card-rotation))
+    scale(var(--editorial-card-scale)) !important;
+}
+
+.linen-site :is(
+  .album-card.editorial-motion-media.is-motion-visible,
+  .linen-media-frame.editorial-motion-media.is-motion-visible,
+  [data-scroll-row] .album-card.editorial-motion-media:not(.editorial-timeline),
+  .editorial-motion-media.editorial-timeline
+) {
+  /* Scroll transforms follow the current frame. Hover has its own animation. */
+  scale: calc(1 + var(--editorial-hover-scale, 0));
+  transition: scale 320ms ease, box-shadow 320ms ease;
+  transform-origin: center;
+}
+
 /* Scroll-driven poses for browsers with scroll timelines (see MotionExperience).
    The browser samples the scroll position in the same frame it paints, so
    cards stay locked to momentum scrolling instead of trailing it. */
 @keyframes editorial-scroll-pose {
   0% {
     transform:
+      perspective(800px)
       translate(var(--editorial-tl-x), calc(-1 * var(--editorial-tl-y)))
+      rotateX(var(--album-tilt-x))
+      rotateY(var(--album-tilt-y))
       rotate(calc(-1 * var(--editorial-tl-r)))
       scale(var(--editorial-tl-s0));
   }
 
   50% {
-    transform: translate(0px, 0px) rotate(0deg) scale(1);
+    transform:
+      perspective(800px)
+      translate(0px, 0px)
+      rotateX(var(--album-tilt-x))
+      rotateY(var(--album-tilt-y))
+      rotate(0deg)
+      scale(1);
   }
 
   100% {
     transform:
+      perspective(800px)
       translate(var(--editorial-tl-x), var(--editorial-tl-y))
+      rotateX(var(--album-tilt-x))
+      rotateY(var(--album-tilt-y))
       rotate(var(--editorial-tl-r))
       scale(var(--editorial-tl-s0));
   }
