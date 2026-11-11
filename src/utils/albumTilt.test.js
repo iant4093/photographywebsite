@@ -23,8 +23,27 @@ describe('album media pointer tilt', () => {
         update(element, 210, 170)
         expect(element.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
-        expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.92deg')
+        expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
         expect(Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))).toBeLessThan(innerTilt)
+    })
+
+    it('softens corners more than straight edges', () => {
+        const element = card()
+
+        update(element, 200, 170)
+        const edgeTilt = Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))
+
+        update(element, 200, 305)
+        const cornerTilt = Math.hypot(
+            Number.parseFloat(element.style.getPropertyValue('--album-tilt-x')),
+            Number.parseFloat(element.style.getPropertyValue('--album-tilt-y')),
+        )
+
+        expect(cornerTilt).toBeLessThan(edgeTilt)
+
+        update(element, 210, 320)
+        expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
+        expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
     })
 
     it('uses stable card dimensions while the transform changes its bounds', () => {
@@ -56,10 +75,10 @@ describe('album media pointer tilt', () => {
         element.getBoundingClientRect = () => ({ left, top: 20, width: 200, height: 300 })
 
         try {
-            update(element, 210, 170)
-            expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.92deg')
+            update(element, 190, 170)
+            expect(Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))).toBeGreaterThan(2)
 
-            left = 110
+            left = 90
             nextFrame()
 
             expect(element.style.getPropertyValue('--glow')).toBe('50.0% 50.0%')
