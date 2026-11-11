@@ -5,7 +5,7 @@ import { Turnstile } from '@marsidev/react-turnstile'
 import { motion as Motion } from 'framer-motion'
 
 // Login page — email + password only, no sign-up
-function Login() {
+function Login({ theme = 'light' }) {
     const { login, completeNewPassword, completeMfa, user, isAdmin } = useAuth()
     const navigate = useNavigate()
     const location = useLocation()
@@ -19,7 +19,9 @@ function Login() {
     const [challenge, setChallenge] = useState(null)
     const [error, setError] = useState('')
     const [submitting, setSubmitting] = useState(false)
-    const [turnstileToken, setTurnstileToken] = useState(null)
+    const [turnstile, setTurnstile] = useState({ theme, token: null })
+    const turnstileToken = turnstile.theme === theme ? turnstile.token : null
+    const setTurnstileToken = token => setTurnstile({ theme, token })
     const authenticationRequest = useRef(null)
     useEffect(() => () => authenticationRequest.current?.abort(), [])
 
@@ -264,10 +266,11 @@ function Login() {
 
                     <div className="mb-6 flex justify-center">
                         <Turnstile
+                            key={theme}
                             ref={turnstileRef}
                             siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                             onSuccess={(token) => setTurnstileToken(token)}
-                            options={{ theme: 'light', action: 'login' }}
+                            options={{ theme, action: 'login' }}
                         />
                     </div>
 

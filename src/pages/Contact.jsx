@@ -5,12 +5,14 @@ import { sendContactMessage } from '../utils/api'
 import { trackContactSubmission } from '../utils/analytics'
 import { SupportEmail } from '../components/LegalPage'
 
-export default function Contact() {
+export default function Contact({ theme = 'light' }) {
     const turnstileRef = useRef(null)
     const [name, setName] = useState('')
     const [email, setEmail] = useState('')
     const [message, setMessage] = useState('')
-    const [turnstileToken, setTurnstileToken] = useState(null)
+    const [turnstile, setTurnstile] = useState({ theme, token: null })
+    const turnstileToken = turnstile.theme === theme ? turnstile.token : null
+    const setTurnstileToken = token => setTurnstile({ theme, token })
     const [status, setStatus] = useState({ type: '', message: '' })
     const [submitting, setSubmitting] = useState(false)
 
@@ -108,6 +110,7 @@ export default function Contact() {
 
                 <div className="mb-8 flex justify-center">
                     <Turnstile
+                        key={theme}
                         ref={turnstileRef}
                         siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                         onSuccess={(token) => setTurnstileToken(token)}
@@ -119,7 +122,7 @@ export default function Contact() {
                             setTurnstileToken(null)
                             setStatus({ type: 'error', message: 'The security check could not be loaded. Please try again.' })
                         }}
-                        options={{ theme: 'auto', action: 'contact' }}
+                        options={{ theme, action: 'contact' }}
                     />
                 </div>
 

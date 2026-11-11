@@ -28,7 +28,7 @@ import LightboxShareButton from '../components/LightboxShareButton'
 import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForPathPhoto, shareUrlForPathVideo } from '../utils/share'
 
-export default function SharedAlbum() {
+export default function SharedAlbum({ theme = 'light' }) {
     const { code } = useParams()
     const navigate = useNavigate()
     const location = useLocation()
@@ -43,7 +43,9 @@ export default function SharedAlbum() {
     const [downloading, setDownloading] = useState(false)
     const [error, setError] = useState(null)
     const [inputCode, setInputCode] = useState('')
-    const [turnstileToken, setTurnstileToken] = useState(null)
+    const [turnstile, setTurnstile] = useState({ theme, token: null })
+    const turnstileToken = turnstile.theme === theme ? turnstile.token : null
+    const setTurnstileToken = useCallback(token => setTurnstile({ theme, token }), [theme])
     const [accessMessage, setAccessMessage] = useState('')
     const [zipError, setZipError] = useState('')
     const [zipStatus, setZipStatus] = useState('')
@@ -98,7 +100,7 @@ export default function SharedAlbum() {
         setImages([])
         resetLightbox()
         setLoading(false)
-    }, [resetLightbox])
+    }, [resetLightbox, setTurnstileToken])
     const requestMediaRefresh = useMediaExpiryRefresh(images, requireFreshVerification)
     const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId: album?.albumId, shareCode: code })
 
@@ -226,11 +228,12 @@ export default function SharedAlbum() {
                 </form>
                 <div className="mt-8 flex justify-center">
                     <Turnstile
+                        key={theme}
                         siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                         onSuccess={(token) => setTurnstileToken(token)}
                         onExpire={() => setTurnstileToken(null)}
                         onError={() => setTurnstileToken(null)}
-                        options={{ theme: 'light', action: 'shared_album' }}
+                        options={{ theme, action: 'shared_album' }}
                     />
                 </div>
             </motion.div>
@@ -252,11 +255,12 @@ export default function SharedAlbum() {
                 <p className="text-warm-gray mb-8">{accessMessage || 'Complete the security check to open this shared gallery.'}</p>
                 <div className="flex justify-center">
                     <Turnstile
+                        key={theme}
                         siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                         onSuccess={(token) => setTurnstileToken(token)}
                         onExpire={() => setTurnstileToken(null)}
                         onError={() => setError('The security check could not be loaded. Please try again.')}
-                        options={{ theme: 'light', action: 'shared_album' }}
+                        options={{ theme, action: 'shared_album' }}
                     />
                 </div>
             </motion.div>

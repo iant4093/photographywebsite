@@ -131,15 +131,15 @@ function App() {
                         <Route path="/stats" element={<Stats />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />
                         <Route path="/video/:albumId" element={<VideoGallery />} />
-                        <Route path="/sharedalbum" element={<SharedAlbum />} />
-                        <Route path="/sharedalbum/:code" element={<SharedAlbum />} />
-                        <Route path="/contact" element={<Contact />} />
+                        <Route path="/sharedalbum" element={<SharedAlbum theme={theme} />} />
+                        <Route path="/sharedalbum/:code" element={<SharedAlbum theme={theme} />} />
+                        <Route path="/contact" element={<Contact theme={theme} />} />
                         <Route path="/privacy" element={<Privacy />} />
                         <Route path="/terms" element={<Terms />} />
                         <Route path="/print-policy" element={<PrintPolicy />} />
                         <Route path="/accessibility" element={<Accessibility />} />
                         <Route path="/licenses" element={<Licenses />} />
-                        <Route path="/login" element={<Login />} />
+                        <Route path="/login" element={<Login theme={theme} />} />
 
                         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
                         <Route path="/admin/security" element={<ProtectedRoute adminOnly allowMfaSetup><AdminSecurity /></ProtectedRoute>} />
