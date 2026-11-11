@@ -430,7 +430,7 @@
   }
 
   .linen-site .album-card:hover {
-    --album-tilt-scale: 1.009;
+    --album-tilt-scale: 1.0072;
   }
 }
 
