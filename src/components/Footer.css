@@ -68,9 +68,9 @@
 }
 
 .linen-closing-bottom {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    justify-content: space-between;
     gap: 22px;
     padding-block: 21px 25px;
     border-top: 1px solid var(--color-warm-border);
@@ -79,6 +79,7 @@
 }
 
 .linen-closing-copyright {
+    justify-self: start;
     margin: 0;
     white-space: nowrap;
 }
@@ -93,6 +94,7 @@
 }
 
 .linen-closing-contact {
+    justify-self: end;
     gap: 20px;
 }
 
@@ -126,7 +128,9 @@
 
 @media (max-width: 1000px) {
     .linen-closing-bottom {
+        display: flex;
         flex-wrap: wrap;
+        justify-content: space-between;
     }
 
     .linen-site .linen-closing-policies {
