@@ -24,7 +24,7 @@ function WebGlRequired() {
                 The walk-through needs WebGL graphics support. Try an up-to-date browser or another
                 device to explore the collection.
             </p>
-            <Link to="/explore" state={{ restoreExploreScroll: true }}>← Back to Explore</Link>
+            <Link to="/explore" state={{ restoreScroll: '/explore' }}>← Back to Explore</Link>
         </section>
     )
 }

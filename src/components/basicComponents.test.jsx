@@ -12,6 +12,7 @@ import ProtectedRoute from './ProtectedRoute'
 import SkeletonGrid from './SkeletonGrid'
 import RouteScrollRestoration from './RouteScrollRestoration'
 import { clearRouteScrollPositions } from '../utils/routeScroll'
+import { saveVerticalScroll } from '../utils/scroll'
 
 
 function routed(ui, initialPath = '/') {
@@ -132,6 +133,25 @@ describe('small presentational and routing components', () => {
       </MemoryRouter>,
     )
     expect(window.scrollTo).toHaveBeenCalledWith({ top: 640, left: 0, behavior: 'instant' })
+  })
+
+  it('restores the saved Apps position when returning from an app', () => {
+    clearRouteScrollPositions()
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 515 })
+    saveVerticalScroll('/apps')
+    window.scrollTo.mockClear()
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback()
+      return 1
+    })
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/apps', state: { restoreScroll: '/apps' } }]}>
+        <RouteScrollRestoration />
+      </MemoryRouter>,
+    )
+
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 515, left: 0, behavior: 'instant' })
   })
 
   it('requires an auth provider and exposes the provided value', () => {

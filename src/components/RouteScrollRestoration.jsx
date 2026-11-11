@@ -14,10 +14,11 @@ export default function RouteScrollRestoration() {
     useLayoutEffect(() => {
         const prior = previous.current
         const route = location.pathname + location.search
-        const returning = location.state?.restoreDashboardScroll || location.state?.restoreExploreScroll
+        const restorePath = location.state?.restoreScroll
+        const returning = location.state?.restoreDashboardScroll || restorePath
         const fallback = location.state?.restoreDashboardScroll
             ? readDashboardScroll()
-            : location.state?.restoreExploreScroll ? getSavedScroll('/explore') : undefined
+            : restorePath ? getSavedScroll(restorePath) : undefined
         const samePage = prior?.pathname === location.pathname && !location.hash
         const stop = watchScrollPosition({
             key: `${location.key}:${route}${location.hash}`,

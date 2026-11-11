@@ -1,5 +1,7 @@
 import { Link } from 'react-router'
 import { APP_MODULES } from '../utils/appModules'
+import { handlePointerTilt } from '../utils/pointerTilt'
+import { saveVerticalScroll } from '../utils/scroll'
 import './Explore.css'
 import './Apps.css'
 
@@ -64,7 +66,7 @@ export function AppComingSoon({ moduleId }) {
     return (
         <div className="explore-page apps-page animate-fade-in pt-[74px]">
             <section className="app-coming-soon max-w-7xl mx-auto px-6 py-20 md:py-28" aria-labelledby="app-title">
-                <Link to="/apps" className="explore-back">← All apps</Link>
+                <Link to="/apps" state={{ restoreScroll: '/apps' }} className="explore-back">← All apps</Link>
                 <div className="app-coming-soon-content">
                     <AppArt id={module.id} />
                     <span className="app-status">Coming soon</span>
@@ -89,7 +91,15 @@ export default function Apps() {
             </header>
             <section className="explore-modules app-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Apps">
                 {APP_MODULES.map((module, index) => (
-                    <Link key={module.id} to={module.path} className="explore-module-card editorial-motion-media">
+                    <Link
+                        key={module.id}
+                        to={module.path}
+                        className="explore-module-card linen-media-frame linen-photo-frame editorial-motion-media"
+                        onClick={() => saveVerticalScroll('/apps')}
+                        onPointerMove={handlePointerTilt}
+                        onPointerLeave={handlePointerTilt}
+                    >
+                        <span className="linen-photo-glow" />
                         <span className="explore-module-number">{String(index + 1).padStart(2, '0')}</span>
                         <AppArt id={module.id} />
                         <div>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import TruongCam from './TruongCam'
@@ -7,6 +7,7 @@ import PhotoApi from './PhotoApi'
 import DesktopApp from './DesktopApp'
 import Apps, { AppComingSoon } from './Apps'
 import DocumentMetadata from '../components/DocumentMetadata'
+import { getSavedScroll } from '../utils/scroll'
 
 function renderApps(path = '/apps') {
     return render(
@@ -45,6 +46,21 @@ describe('Apps navigation', () => {
         expect(within(modules).getAllByRole('link')).toHaveLength(8)
         fireEvent.click(within(modules).getByRole('link', { name: /Web Editor/ }))
         expect(screen.getByRole('heading', { name: 'Existing photo editor' })).toBeInTheDocument()
+    })
+
+    it('adds pointer motion and saves the Apps scroll before opening a tile', async () => {
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 })
+        renderApps()
+        const module = screen.getByRole('link', { name: /TruongCam/ })
+        module.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200, height: 300 })
+        module.matches = vi.fn(() => true)
+
+        fireEvent(module, new MouseEvent('pointermove', { bubbles: true, clientX: 190, clientY: 170 }))
+
+        await waitFor(() => expect(Number.parseFloat(module.style.getPropertyValue('--album-tilt-y'))).toBeGreaterThan(2))
+        expect(module.style.getPropertyValue('--glow')).toBe('90.0% 50.0%')
+        fireEvent.click(module)
+        expect(getSavedScroll('/apps')).toBe(480)
     })
 
     it('opens the Photo API reference with the public endpoint and selection rules', () => {

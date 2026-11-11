@@ -601,6 +601,33 @@
   cursor: wait;
 }
 
+.linen-site .explore-results-stage {
+  position: relative;
+}
+
+.linen-site .explore-results-stage .explore-grid {
+  transition: opacity 180ms ease;
+}
+
+.linen-site .explore-results-stage.is-updating .explore-grid {
+  opacity: 0.48;
+  pointer-events: none;
+}
+
+.linen-site .explore-results-updating {
+  position: absolute;
+  z-index: 3;
+  top: 0.75rem;
+  right: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-warm-border);
+  background: var(--color-cream);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .linen-site .explore-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1115,6 +1142,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .linen-site .explore-results-stage .explore-grid {
+    transition: none;
+  }
+
   .linen-site .explore-photo-card,
   .linen-site .explore-color-options button,
   .linen-site .explore-lens-options button,
