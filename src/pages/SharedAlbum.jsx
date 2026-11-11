@@ -27,6 +27,7 @@ import PhotoLightbox from '../components/PhotoLightbox'
 import LightboxShareButton from '../components/LightboxShareButton'
 import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForPathPhoto, shareUrlForPathVideo } from '../utils/share'
+import { handlePointerTilt } from '../utils/pointerTilt'
 
 export default function SharedAlbum({ theme = 'light' }) {
     const { code } = useParams()
@@ -397,6 +398,8 @@ export default function SharedAlbum({ theme = 'light' }) {
                                     key={mediaId(img) || index}
                                     className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative text-left"
                                     onClick={() => openPhoto(img)}
+                                    onPointerMove={handlePointerTilt}
+                                    onPointerLeave={handlePointerTilt}
                                     aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
                                 >
                                     <div
