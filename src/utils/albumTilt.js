@@ -1,4 +1,8 @@
 const DEAD_ZONE = 0.16
+let trackedCard
+let pointerX
+let pointerY
+let frame
 
 function softenCenter(value) {
     const magnitude = Math.abs(value)
@@ -8,7 +12,7 @@ function softenCenter(value) {
     return Math.sign(value) * eased
 }
 
-export function update(card, clientX, clientY) {
+function paint(card, clientX, clientY) {
     const bounds = card.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width - 0.5) * 2
     const y = ((clientY - bounds.top) / bounds.height - 0.5) * 2
@@ -17,7 +21,32 @@ export function update(card, clientX, clientY) {
     card.style.setProperty('--album-tilt-y', `${(softenCenter(x) * 2.64).toFixed(2)}deg`)
 }
 
+function followMovingCard() {
+    frame = undefined
+    if (!trackedCard) return
+    if (!trackedCard.matches(':hover')) {
+        reset(trackedCard)
+        return
+    }
+    paint(trackedCard, pointerX, pointerY)
+    frame = requestAnimationFrame(followMovingCard)
+}
+
+export function update(card, clientX, clientY) {
+    paint(card, clientX, clientY)
+    if (!card.classList.contains('floating-print-card')) return
+    trackedCard = card
+    pointerX = clientX
+    pointerY = clientY
+    frame ||= requestAnimationFrame(followMovingCard)
+}
+
 export function reset(card) {
+    if (trackedCard === card) {
+        trackedCard = undefined
+        cancelAnimationFrame(frame)
+        frame = undefined
+    }
     card.style.removeProperty('--album-tilt-x')
     card.style.removeProperty('--album-tilt-y')
 }
