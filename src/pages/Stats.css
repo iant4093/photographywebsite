@@ -9,9 +9,7 @@
     border-bottom: 1px solid var(--color-charcoal);
 }
 
-.photo-stats-eyebrow,
-.photo-stats-section-index,
-.photo-stats-section-detail {
+.photo-stats-eyebrow {
     color: var(--color-warm-gray);
     font-size: 0.68rem;
     letter-spacing: 0.18em;
@@ -468,10 +466,6 @@
 }
 
 .photo-stats-section-heading {
-    display: grid;
-    grid-template-columns: 2rem minmax(0, 1fr) auto;
-    align-items: end;
-    gap: 1rem;
     margin-bottom: 2rem;
     padding: 0.8rem 0 1rem;
     border-top: 1px solid var(--color-charcoal);
@@ -1043,8 +1037,6 @@ button.shooting-calendar-cell[aria-pressed="true"] {
     .photo-stats-timeline-card { grid-template-rows: 6.1rem max-content max-content; }
     .photo-stats-timeline-card strong { font-size: 1.08rem; }
     .photo-stats-timeline-node time { font-size: 0.54rem; }
-    .photo-stats-section-heading { grid-template-columns: 1.7rem minmax(0, 1fr); }
-    .photo-stats-section-detail { grid-column: 2; }
     .photo-stats-category-copy { grid-template-columns: 1.7rem minmax(0, 1fr); }
     .photo-stats-category-copy > span:last-child { grid-column: 2; }
     .photo-stats-category-track { margin-left: 2.5rem; }
