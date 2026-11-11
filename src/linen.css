@@ -411,6 +411,29 @@
   transform: scale(calc(1 + var(--editorial-hover-scale)));
 }
 
+.linen-site .album-card--pointer-tilt {
+  --album-tilt-x: 0deg;
+  --album-tilt-y: 0deg;
+  --album-tilt-scale: 1;
+  transform-origin: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .linen-site .album-card--pointer-tilt {
+    animation: none !important;
+    transform:
+      perspective(800px)
+      rotateX(var(--album-tilt-x))
+      rotateY(var(--album-tilt-y))
+      scale(var(--album-tilt-scale)) !important;
+    transition: transform 120ms ease-out, box-shadow 320ms ease;
+  }
+
+  .linen-site .album-card--pointer-tilt:hover {
+    --album-tilt-scale: 1.009;
+  }
+}
+
 .linen-site :is(.album-card, .floating-print-card):hover {
   --editorial-hover-scale: 0.015;
   box-shadow:
