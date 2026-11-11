@@ -12,6 +12,8 @@ export function update(card, clientX, clientY) {
     const bounds = card.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width - 0.5) * 2
     const y = ((clientY - bounds.top) / bounds.height - 0.5) * 2
+    card.style.setProperty('--glow-x', `${((x + 1) * 50).toFixed(1)}%`)
+    card.style.setProperty('--glow-y', `${((y + 1) * 50).toFixed(1)}%`)
     card.style.setProperty('--album-tilt-x', `${(-softenCenter(y) * 2.1).toFixed(2)}deg`)
     card.style.setProperty('--album-tilt-y', `${(softenCenter(x) * 2.64).toFixed(2)}deg`)
 }
