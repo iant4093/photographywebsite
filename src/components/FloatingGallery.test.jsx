@@ -108,13 +108,13 @@ describe('FloatingGallery', () => {
         card.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200, height: 300 })
         card.matches = vi.fn(() => true)
 
-        fireEvent(card, new MouseEvent('pointermove', { bubbles: true, clientX: 210, clientY: 170 }))
+        fireEvent(card, new MouseEvent('pointermove', { bubbles: true, clientX: 190, clientY: 170 }))
 
-        await waitFor(() => expect(card.style.getPropertyValue('--glow')).toBe('100.0% 50.0%'))
-        expect(card.style.getPropertyValue('--album-tilt-y')).toBe('0.92deg')
+        await waitFor(() => expect(card.style.getPropertyValue('--glow')).toBe('90.0% 50.0%'))
+        expect(Number.parseFloat(card.style.getPropertyValue('--album-tilt-y'))).toBeGreaterThan(2)
         expect(card.style.getPropertyValue('--floating-tilt')).not.toBe('')
         fireEvent.pointerLeave(card)
-        expect(card.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
+        expect(card.style.getPropertyValue('--glow')).toBe('90.0% 50.0%')
     })
 
     it('slows rather than stops the wall for pointer and keyboard interaction', () => {

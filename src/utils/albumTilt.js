@@ -12,11 +12,16 @@ function softenCenter(value) {
     return Math.sign(value) * eased
 }
 
+function smoothFade(value, start) {
+    if (value <= start) return 1
+    const progress = Math.min(1, (value - start) / (1 - start))
+    return 1 - progress * progress * (3 - 2 * progress)
+}
+
 function edgeStability(x, y) {
     const edge = Math.max(Math.abs(x), Math.abs(y))
-    if (edge <= 0.84) return 1
-    const progress = Math.min(1, (edge - 0.84) / 0.16)
-    return 1 - 0.65 * progress * progress * (3 - 2 * progress)
+    const corner = Math.hypot(x, y) / Math.SQRT2
+    return smoothFade(edge, 0.8) * smoothFade(corner, 0.72)
 }
 
 function paint(card, clientX, clientY) {
