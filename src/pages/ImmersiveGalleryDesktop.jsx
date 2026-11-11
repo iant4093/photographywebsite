@@ -5709,7 +5709,7 @@ function CatalogStatus({ error, onRetry }) {
             <h1>The gallery could not open</h1>
             <p>{error}</p>
             <button type="button" onClick={onRetry}>Try again</button>
-            <Link to="/explore" state={{ restoreExploreScroll: true }}>Back to Explore</Link>
+            <Link to="/explore" state={{ restoreScroll: '/explore' }}>Back to Explore</Link>
         </div>
     )
 }
@@ -6049,7 +6049,7 @@ export default function ImmersiveGalleryDesktop() {
                 </div>
             )}
             <div className="museum-topbar">
-                <Link to="/explore" state={{ restoreExploreScroll: true }}>← Exit gallery</Link>
+                <Link to="/explore" state={{ restoreScroll: '/explore' }}>← Exit gallery</Link>
                 <div>
                     <strong>Ian Truong Photography</strong>
                     <span>{catalog.length} rooms · {catalog.reduce((sum, category) => sum + category.albums.length, 0)} albums</span>

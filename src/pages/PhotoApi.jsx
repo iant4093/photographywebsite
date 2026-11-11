@@ -14,7 +14,7 @@ export default function PhotoApi() {
     return (
         <div className="explore-page apps-page animate-fade-in pt-[74px]">
             <article className="app-api-reference mx-auto max-w-3xl px-6 pt-14 pb-20 md:pt-20 md:pb-28">
-                <Link to="/apps" className="explore-back">← All apps</Link>
+                <Link to="/apps" state={{ restoreScroll: '/apps' }} className="explore-back">← All apps</Link>
                 <header className="linen-section-heading mt-8">
                     <span>Developer tools</span>
                     <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">Photo API</h1>

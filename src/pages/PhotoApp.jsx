@@ -55,7 +55,7 @@ export default function PhotoApp({ moduleId }) {
     return (
         <div className="explore-page apps-page photo-app-page animate-fade-in pt-[74px]">
             <div className="cam-shell">
-                <Link to="/apps" className="explore-back">← All apps</Link>
+                <Link to="/apps" state={{ restoreScroll: '/apps' }} className="explore-back">← All apps</Link>
                 <header className="cam-hero">
                     <div className="cam-hero-copy">
                         <div className="cam-title"><img src={`${assets}/icon.png`} alt="" width="56" height="56" /><h1>{app.title}</h1></div>

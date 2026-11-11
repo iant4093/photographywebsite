@@ -35,6 +35,7 @@ import { shareUrlForAlbumPhoto } from '../utils/share'
 import { saveVerticalScroll } from '../utils/scroll'
 import { EXPLORE_MODULES } from '../utils/exploreModules'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
+import { handlePointerTilt } from '../utils/pointerTilt'
 
 const PAGE_SIZE = 24
 const ImmersiveGallery = lazy(() => import('./ImmersiveGallery'))
@@ -147,11 +148,14 @@ function ExploreLanding() {
                     <Link
                         key={module.id}
                         to={module.path}
-                        className={`explore-module-card${module.id === 'immersive' ? ' explore-module-card--immersive' : ''} editorial-motion-media`}
+                        className={`explore-module-card linen-media-frame linen-photo-frame${module.id === 'immersive' ? ' explore-module-card--immersive' : ''} editorial-motion-media`}
                         onClick={() => saveVerticalScroll('/explore')}
+                        onPointerMove={handlePointerTilt}
+                        onPointerLeave={handlePointerTilt}
                         onPointerEnter={module.prefetch ? () => warmModule(module.prefetch) : undefined}
                         onFocus={module.prefetch ? () => warmModule(module.prefetch) : undefined}
                     >
+                        <span className="linen-photo-glow" />
                         <span className="explore-module-number">{String(index + 1).padStart(2, '0')}</span>
                         {MODULE_ART[module.id] || <div aria-hidden="true" />}
                         <div>
@@ -167,7 +171,7 @@ function ExploreLanding() {
 }
 
 function ExploreBackLink() {
-    return <Link to="/explore" state={{ restoreExploreScroll: true }} className="explore-back">← All Explore modules</Link>
+    return <Link to="/explore" state={{ restoreScroll: '/explore' }} className="explore-back">← All Explore modules</Link>
 }
 
 function ExploreShuffleButton({ label, loading, disabled = false, onClick }) {
@@ -191,11 +195,14 @@ function ExploreCard({ item, index, mode, onOpen }) {
     return (
         <button
             type="button"
-            className="explore-photo-card editorial-motion-media"
+            className="explore-photo-card linen-media-frame linen-photo-frame editorial-motion-media"
             data-camera-cursor="photo"
             onClick={() => onOpen(index)}
+            onPointerMove={handlePointerTilt}
+            onPointerLeave={handlePointerTilt}
             aria-label={`View photo from ${item.albumTitle}`}
         >
+            <span className="linen-photo-glow" />
             <ProgressiveImage
                 src={item.thumbnailUrl}
                 srcSet={mediaPreviewSrcSet(item)}
@@ -221,6 +228,26 @@ function ExploreCard({ item, index, mode, onOpen }) {
                 )}
             </span>
         </button>
+    )
+}
+
+function ExploreGrid({ items, mode, onOpen, updating }) {
+    if (!items.length) return null
+    return (
+        <div className={`explore-results-stage${updating ? ' is-updating' : ''}`} aria-busy={updating}>
+            {updating && <span className="explore-results-updating" role="status">Updating photographs…</span>}
+            <div className="explore-grid" inert={updating ? true : undefined}>
+                {items.map((item, index) => (
+                    <ExploreCard
+                        key={`${item.albumId}:${mediaId(item)}`}
+                        item={item}
+                        index={index}
+                        mode={mode}
+                        onOpen={onOpen}
+                    />
+                ))}
+            </div>
+        </div>
     )
 }
 
@@ -276,6 +303,7 @@ function ExploreModule({ mode }) {
     const nextCursor = hasCurrentPage ? pageState.nextCursor : null
     const resultError = hasCurrentPage ? pageState.error : ''
     const loading = Boolean(requestKey && !hasCurrentPage)
+    const displayItems = hasCurrentPage ? items : pageState.items
 
     useEffect(() => {
         setLightboxIndex(null)
@@ -441,7 +469,7 @@ function ExploreModule({ mode }) {
                         <ExploreShuffleButton label={`${activeLabel} photographs`} loading={reshuffling} disabled={loading} onClick={reshuffle} />
                     </div>
                 )}
-                {loading && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
+                {loading && displayItems.length === 0 && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!facetLoading && !facetError && !loading && !resultError && !activeFacet && (
                     <div className="explore-empty"><h2>No indexed photographs</h2><p>Try another Explore module.</p></div>
@@ -449,19 +477,7 @@ function ExploreModule({ mode }) {
                 {!loading && !resultError && activeFacet && items.length === 0 && (
                     <div className="explore-empty"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
                 )}
-                {items.length > 0 && (
-                    <div className="explore-grid">
-                        {items.map((item, index) => (
-                            <ExploreCard
-                                key={`${item.albumId}:${mediaId(item)}`}
-                                item={item}
-                                index={index}
-                                mode={mode}
-                                onOpen={setLightboxIndex}
-                            />
-                        ))}
-                    </div>
-                )}
+                <ExploreGrid items={displayItems} mode={mode} onOpen={setLightboxIndex} updating={loading} />
                 {nextCursor && (
                     <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
                         {loadingMore ? 'Loading…' : 'Show more'}
@@ -538,6 +554,7 @@ function TemporalExplorer({ mode }) {
     const nextCursor = hasCurrentPage ? pageState.nextCursor : null
     const resultError = hasCurrentPage ? pageState.error : ''
     const loading = Boolean(requestKey && !hasCurrentPage)
+    const displayItems = hasCurrentPage ? items : pageState.items
     const loadingMore = loadingMoreKey === requestKey
     const reshuffling = reshufflingKey === requestKey
 
@@ -808,7 +825,7 @@ function TemporalExplorer({ mode }) {
                         />
                     </div>
                 )}
-                {loading && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
+                {loading && displayItems.length === 0 && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!facetState.loading && !facetState.error && !activeFacet && (
                     <div className="explore-empty"><h2>No dated photographs yet</h2><p>Photos without trustworthy capture dates are intentionally omitted.</p></div>
@@ -816,19 +833,7 @@ function TemporalExplorer({ mode }) {
                 {!loading && activeFacet && items.length === 0 && !resultError && (
                     <div className="explore-empty"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
                 )}
-                {items.length > 0 && (
-                    <div className="explore-grid">
-                        {items.map((item, index) => (
-                            <ExploreCard
-                                key={`${item.albumId}:${mediaId(item)}`}
-                                item={item}
-                                index={index}
-                                mode={mode}
-                                onOpen={openLightbox}
-                            />
-                        ))}
-                    </div>
-                )}
+                <ExploreGrid items={displayItems} mode={mode} onOpen={openLightbox} updating={loading} />
                 {nextCursor && (
                     <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore || reshuffling}>
                         {loadingMore ? 'Loading…' : 'Show more'}
@@ -930,6 +935,7 @@ function ExposureExplorer() {
     const nextCursor = hasCurrentPage ? pageState.nextCursor : null
     const resultError = hasCurrentPage ? pageState.error : ''
     const loading = facetState.loading || (!facetState.error && !hasCurrentPage)
+    const displayImages = hasCurrentPage ? images : pageState.items
 
     useEffect(() => {
         const controller = new AbortController()
@@ -1093,7 +1099,7 @@ function ExposureExplorer() {
                     </div>
                 </section>
 
-                {loading && <div className="explore-loading" role="status" aria-busy="true">Reading exposure settings…</div>}
+                {loading && displayImages.length === 0 && <div className="explore-loading" role="status" aria-busy="true">Reading exposure settings…</div>}
                 {facetState.error && <p className="explore-error" role="alert">{facetState.error}</p>}
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!loading && !facetState.error && !resultError && (
@@ -1112,19 +1118,7 @@ function ExposureExplorer() {
                 {!loading && !facetState.error && !resultError && images.length === 0 && (
                     <div className="explore-empty"><h2>No photographs found</h2><p>Choose another setting to keep exploring.</p></div>
                 )}
-                {images.length > 0 && (
-                    <div className="explore-grid">
-                        {images.map((item, itemIndex) => (
-                            <ExploreCard
-                                key={`${item.albumId}:${mediaId(item)}`}
-                                item={item}
-                                index={itemIndex}
-                                mode="exposure"
-                                onOpen={setLightboxIndex}
-                            />
-                        ))}
-                    </div>
-                )}
+                <ExploreGrid items={displayImages} mode="exposure" onOpen={setLightboxIndex} updating={loading} />
                 {nextCursor && (
                     <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
                         {loadingMore ? 'Loading…' : 'Show more'}
@@ -1273,8 +1267,8 @@ export default function Explore() {
     if (pathname === '/explore/colors') return <ExploreModule mode="color" />
     if (pathname === '/explore/lenses') return <ExploreModule mode="lens" />
     if (pathname === '/explore/exposure') return <ExposureExplorer />
-    if (pathname === '/explore/time-of-day') return <TemporalExplorer key={location.key} mode="time" />
-    if (pathname === '/explore/seasons') return <TemporalExplorer key={location.key} mode="season" />
+    if (pathname === '/explore/time-of-day') return <TemporalExplorer key="time" mode="time" />
+    if (pathname === '/explore/seasons') return <TemporalExplorer key="season" mode="season" />
     if (pathname === '/explore/guess-settings') return <GuessSettingsGame />
     return <ExploreLanding />
 }

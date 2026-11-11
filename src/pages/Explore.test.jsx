@@ -208,6 +208,23 @@ describe('Explore', () => {
     ))
   })
 
+  it('keeps time results in place while a new period loads', async () => {
+    const nextPage = deferred()
+    exploreApi.fetchExplorePhotos.mockReturnValue(nextPage.promise)
+    render(<MemoryRouter initialEntries={['/explore/time-of-day?period=dawn']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Evening/ }))
+    expect(await screen.findByText('Updating photographs…')).toBeInTheDocument()
+    expect(screen.getByText('Blue Mountain')).toBeInTheDocument()
+
+    await act(async () => {
+      nextPage.resolve({ items: [secondPhoto], nextCursor: null, seed: '0123456789abcdef' })
+    })
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(screen.queryByText('Blue Mountain')).toBeNull()
+  })
+
   it('browses seasons and leaves zero-count fixed choices visibly disabled', async () => {
     exploreApi.fetchExploreSeasons.mockResolvedValue({
       items: [
@@ -310,6 +327,23 @@ describe('Explore', () => {
     expect(screen.getByRole('button', { pressed: true })).toHaveTextContent('Clean light')
   })
 
+  it('keeps exposure results in place while a new setting loads', async () => {
+    const nextPage = deferred()
+    exploreApi.fetchExplorePhotos.mockReturnValue(nextPage.promise)
+    render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Stopped Down/ }))
+    expect(await screen.findByText('Updating photographs…')).toBeInTheDocument()
+    expect(screen.getByText('Blue Mountain')).toBeInTheDocument()
+
+    await act(async () => {
+      nextPage.resolve({ items: [secondPhoto], total: 30, nextCursor: null })
+    })
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(screen.queryByText('Blue Mountain')).toBeNull()
+  })
+
   it('restores the selected exposure setting from the URL after a refresh', async () => {
     render(<MemoryRouter initialEntries={['/explore/exposure?setting=shutter:frozen']}><Explore /></MemoryRouter>)
 
@@ -377,7 +411,7 @@ describe('Explore', () => {
     expect(scroll.saveVerticalScroll).toHaveBeenCalledWith('/explore')
     first.unmount()
 
-    render(<MemoryRouter initialEntries={[{ pathname: '/explore', state: { restoreExploreScroll: true } }]}><Explore /></MemoryRouter>)
+    render(<MemoryRouter initialEntries={[{ pathname: '/explore', state: { restoreScroll: '/explore' } }]}><Explore /></MemoryRouter>)
     expect(screen.getByRole('heading', { name: 'Explore', level: 1 })).toBeInTheDocument()
   })
 
@@ -430,8 +464,35 @@ describe('Explore', () => {
     )
     expect(screen.getByLabelText('Extracted color palette')).toBeInTheDocument()
     expect(document.querySelector('.explore-photo-image')).toHaveAttribute('data-blurhash', photo.blurhash)
-    fireEvent.click(screen.getByRole('button', { name: 'View photo from Blue Mountain' }))
+    const result = screen.getByRole('button', { name: 'View photo from Blue Mountain' })
+    result.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200, height: 300 })
+    result.matches = vi.fn(() => true)
+    fireEvent(result, new MouseEvent('pointermove', { bubbles: true, clientX: 190, clientY: 170 }))
+    await waitFor(() => expect(Number.parseFloat(result.style.getPropertyValue('--album-tilt-y'))).toBeGreaterThan(2))
+    expect(result.style.getPropertyValue('--glow')).toBe('90.0% 50.0%')
+    fireEvent.click(result)
     expect(screen.getByRole('dialog', { name: 'Photographs in Color Explorer' })).toHaveTextContent('Canon EOS R7')
+  })
+
+  it('keeps color results in place while a new color loads', async () => {
+    const nextPage = deferred()
+    exploreApi.fetchExploreColors.mockResolvedValue({
+      items: [{ id: 'blue', photos: 12 }, { id: 'green', photos: 8 }],
+      initialPage: { value: 'blue', items: [photo], nextCursor: null },
+    })
+    exploreApi.fetchExplorePhotos.mockReturnValue(nextPage.promise)
+    render(<MemoryRouter initialEntries={['/explore/colors?color=blue']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Green/ }))
+    expect(await screen.findByText('Updating photographs…')).toBeInTheDocument()
+    expect(screen.getByText('Blue Mountain')).toBeInTheDocument()
+
+    await act(async () => {
+      nextPage.resolve({ items: [secondPhoto], nextCursor: null })
+    })
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(screen.queryByText('Blue Mountain')).toBeNull()
   })
 
   it('uses a bundled initial page without making a second blocking request', async () => {
