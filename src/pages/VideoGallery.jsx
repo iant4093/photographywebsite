@@ -25,6 +25,7 @@ import { shareUrlForAlbumVideo } from '../utils/share'
 import useAlbumRouteId from '../hooks/useAlbumRouteId'
 import { albumHandle } from '../utils/albumRoutes'
 import AlbumLoadingSkeleton from '../components/AlbumLoadingSkeleton'
+import { handlePointerTilt } from '../utils/pointerTilt'
 
 // A readable URL (/video/<slug>) resolves to its album id before the page loads.
 export default function VideoGallery() {
@@ -310,6 +311,8 @@ function VideoGalleryContent({ albumId }) {
                             key={mediaId(img) || index}
                             className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-video relative text-left"
                             onClick={() => setLightboxIndex(index)}
+                            onPointerMove={handlePointerTilt}
+                            onPointerLeave={handlePointerTilt}
                             aria-label={`Open video ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
                         >
                             <ProgressiveImage

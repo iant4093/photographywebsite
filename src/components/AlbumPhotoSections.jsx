@@ -1,6 +1,7 @@
 import { memo, useId } from 'react'
 import ProgressiveImage from './ProgressiveImage'
 import { mediaId, mediaPreviewSrcSet, mediaThumbnailUrl } from '../utils/mediaUrls'
+import { handlePointerTilt } from '../utils/pointerTilt'
 
 // `onIntent(image, immediate)` lets a page warm the viewer image before a click:
 // hover is a weak signal, while focus and press are about to open the photo.
@@ -20,6 +21,8 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                     key={mediaId(img) || index}
                     className="album-photo-tile linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                     onClick={() => onOpen(img)}
+                    onPointerMove={handlePointerTilt}
+                    onPointerLeave={handlePointerTilt}
                     onPointerEnter={onIntent ? () => onIntent(img, false) : undefined}
                     onPointerDown={onIntent ? () => onIntent(img, true) : undefined}
                     onFocus={onIntent ? () => onIntent(img, true) : undefined}
@@ -39,7 +42,7 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                             onError={onMediaError}
                             className="w-full h-full"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-charcoal/12 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                     </div>
                 </button>)}
             </div>

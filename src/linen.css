@@ -411,7 +411,7 @@
   transform: scale(calc(1 + var(--editorial-hover-scale)));
 }
 
-.linen-site .album-card {
+.linen-site :is(.album-card, .linen-media-frame) {
   --album-tilt-x: 0deg;
   --album-tilt-y: 0deg;
   --album-tilt-scale: 1;
@@ -419,7 +419,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .linen-site .album-card {
+  .linen-site :is(.album-card, .linen-media-frame) {
     animation: none !important;
     transform:
       perspective(800px)
@@ -429,7 +429,7 @@
     transition: transform 120ms ease-out, box-shadow 320ms ease;
   }
 
-  .linen-site .album-card:hover {
+  .linen-site :is(.album-card, .linen-media-frame):hover {
     --album-tilt-scale: 1.0072;
   }
 }
@@ -552,6 +552,12 @@
   box-shadow:
     0 0 0 1px rgba(255, 252, 245, 0.78) inset,
     6px 7px 0 rgba(91, 70, 51, 0.1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .linen-site .linen-media-frame {
+    transition: transform 120ms ease-out, box-shadow 320ms ease;
+  }
 }
 
 .linen-site .linen-media-frame > .relative,

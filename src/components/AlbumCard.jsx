@@ -9,17 +9,7 @@ import { registerMobileAlbumPreview } from '../utils/mobileAlbumPreview'
 import { canRunAlbumPreview, MOBILE_PREVIEW_QUERY } from '../utils/albumPreviewPolicy'
 import { albumPath } from '../utils/albumRoutes'
 import { formatAlbumDate } from '../utils/galleryFormatting'
-
-let pointerTiltRuntime
-
-function handlePointerTilt({ currentTarget: card, type, clientX, clientY }) {
-    pointerTiltRuntime ||= import('../utils/albumTilt')
-    pointerTiltRuntime.then(({ update, reset }) => (
-        type === 'pointermove' && card.matches(':hover')
-            ? update(card, clientX, clientY)
-            : reset(card)
-    ))
-}
+import { handlePointerTilt } from '../utils/pointerTilt'
 
 // Shared album card used by public, video, and signed-in catalogs.
 function AlbumCard({
