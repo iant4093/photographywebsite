@@ -111,6 +111,7 @@ describe('FloatingGallery', () => {
         fireEvent(card, new MouseEvent('pointermove', { bubbles: true, clientX: 210, clientY: 170 }))
 
         await waitFor(() => expect(card.style.getPropertyValue('--glow')).toBe('100.0% 50.0%'))
+        expect(card.style.getPropertyValue('--album-tilt-y')).toBe('2.64deg')
         expect(card.style.getPropertyValue('--floating-tilt')).not.toBe('')
         fireEvent.pointerLeave(card)
         expect(card.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
