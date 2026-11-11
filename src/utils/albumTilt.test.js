@@ -16,10 +16,30 @@ describe('album media pointer tilt', () => {
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
 
+        update(element, 190, 170)
+        const innerTilt = Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))
+        expect(innerTilt).toBeGreaterThan(2)
+
         update(element, 210, 170)
         expect(element.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
-        expect(element.style.getPropertyValue('--album-tilt-y')).toBe('2.64deg')
+        expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.92deg')
+        expect(Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))).toBeLessThan(innerTilt)
+    })
+
+    it('uses stable card dimensions while the transform changes its bounds', () => {
+        const element = card()
+        let bounds = { left: 10, top: 20, width: 200, height: 300 }
+        Object.defineProperty(element, 'offsetWidth', { value: 200 })
+        Object.defineProperty(element, 'offsetHeight', { value: 300 })
+        element.getBoundingClientRect = () => bounds
+
+        update(element, 190, 170)
+        const firstTilt = element.style.getPropertyValue('--album-tilt-y')
+        bounds = { left: 5, top: 15, width: 210, height: 310 }
+        update(element, 190, 170)
+
+        expect(element.style.getPropertyValue('--album-tilt-y')).toBe(firstTilt)
     })
 
     it('recalculates while a scrolling card moves under a still pointer', () => {
@@ -37,7 +57,7 @@ describe('album media pointer tilt', () => {
 
         try {
             update(element, 210, 170)
-            expect(element.style.getPropertyValue('--album-tilt-y')).toBe('2.64deg')
+            expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.92deg')
 
             left = 110
             nextFrame()
