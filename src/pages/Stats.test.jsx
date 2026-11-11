@@ -106,6 +106,23 @@ describe('photography statistics page', () => {
         expect(photoPreview.stop).toHaveBeenCalledOnce()
     })
 
+    it('adds card-only glow and tilt without replacing timeline movement', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Same Day Photo Album' })
+        card.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200, height: 300 })
+        card.matches = vi.fn(() => true)
+
+        fireEvent(card, new MouseEvent('pointermove', { bubbles: true, clientX: 190, clientY: 170 }))
+
+        await waitFor(() => expect(Number.parseFloat(card.style.getPropertyValue('--album-tilt-y'))).toBeGreaterThan(2))
+        expect(card.style.getPropertyValue('--glow')).toBe('90.0% 50.0%')
+        expect(card.querySelector('.linen-photo-glow')).toBeNull()
+        expect(card).toHaveAttribute('data-timeline-position', 'below')
+        fireEvent.pointerLeave(card)
+        await waitFor(() => expect(card.style.getPropertyValue('--album-tilt-y')).toBe(''))
+    })
+
     it('cancels a photo preview while its manifest is still loading', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)
         photoPreview.fetchManifest.mockReturnValue(new Promise(() => {}))

@@ -290,6 +290,10 @@
 }
 
 .photo-stats-timeline-card {
+    --timeline-hover-y: 0px;
+    --album-tilt-x: 0deg;
+    --album-tilt-y: 0deg;
+    --album-tilt-scale: 1;
     position: relative;
     display: grid;
     width: var(--timeline-card-width);
@@ -301,22 +305,48 @@
     border: 1px solid var(--color-warm-border);
     color: var(--color-charcoal);
     background: color-mix(in srgb, var(--color-cream-dark) 45%, transparent);
+    transform:
+        perspective(800px)
+        translateY(var(--timeline-hover-y))
+        rotateX(var(--album-tilt-x))
+        rotateY(var(--album-tilt-y))
+        scale(var(--album-tilt-scale));
     transform-origin: center;
-    transition: border-color 220ms ease, box-shadow 220ms ease, transform 260ms ease;
+    transition: border-color 220ms ease, box-shadow 220ms ease, transform 120ms ease-out;
+}
+
+.photo-stats-timeline-card::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    background: radial-gradient(105% 135% at var(--glow, 50% 50%), rgba(255, 255, 255, 0.075), transparent);
+    transition: opacity 220ms ease;
+}
+
+.photo-stats-timeline-card:hover::before {
+    opacity: 1;
+}
+
+.photo-stats-timeline-card > * {
+    position: relative;
+    z-index: 1;
 }
 
 .photo-stats-timeline-card:hover {
-    --editorial-hover-scale: 0.015;
+    --album-tilt-scale: 1.012;
     border-color: var(--color-charcoal);
     box-shadow: 6px 7px 0 color-mix(in srgb, var(--color-charcoal) 8%, transparent);
 }
 
 .photo-stats-timeline-card[data-timeline-position="above"]:hover {
-    transform: translateY(-4px) scale(1.012);
+    --timeline-hover-y: -4px;
 }
 
 .photo-stats-timeline-card[data-timeline-position="below"]:hover {
-    transform: translateY(4px) scale(1.012);
+    --timeline-hover-y: 4px;
 }
 
 .photo-stats-timeline-index {

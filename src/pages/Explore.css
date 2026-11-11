@@ -196,7 +196,7 @@
   inset: 12%;
   border: 1px solid var(--color-warm-border);
   border-radius: 50%;
-  transition: transform 380ms ease, background-color 380ms ease, box-shadow 380ms ease;
+  transition: inset 380ms ease, background-color 380ms ease, box-shadow 380ms ease;
 }
 
 .linen-site .explore-module-lens::after { inset: 25%; }
@@ -205,24 +205,24 @@
 .linen-site .explore-module-lens i:nth-child(3) { inset: 49%; background: var(--color-charcoal); }
 
 .linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens::before {
-  transform: scale(1.08);
+  inset: 9%;
 }
 
 .linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens::after {
-  transform: scale(0.88);
+  inset: 28%;
 }
 
 .linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens i:nth-child(1) {
-  transform: scale(1.12);
+  inset: 34%;
   background: rgba(66, 111, 156, 0.34);
 }
 
 .linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens i:nth-child(2) {
-  transform: scale(0.86);
+  inset: 45%;
 }
 
 .linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens i:nth-child(3) {
-  transform: scale(1.35);
+  inset: 48.5%;
   box-shadow: 0 0 1.2rem rgba(66, 111, 156, 0.4);
 }
 

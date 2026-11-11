@@ -12,6 +12,7 @@ import ProgressiveImage from '../components/ProgressiveImage'
 import ShootingCalendar from '../components/ShootingCalendar'
 import './Stats.css'
 import { albumPath } from '../utils/albumRoutes'
+import { handlePointerTilt } from '../utils/pointerTilt'
 
 
 const numberFormatter = new Intl.NumberFormat('en-US')
@@ -285,6 +286,8 @@ function TimelineCard({ album, index, position }) {
             data-timeline-position={position}
             to={albumRoute(album)}
             aria-label={`View ${album.title}`}
+            onPointerMove={handlePointerTilt}
+            onPointerLeave={handlePointerTilt}
             onMouseEnter={() => {
                 setHovered(true)
                 if (!hoverController.current) startPreview()
