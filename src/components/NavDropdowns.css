@@ -83,7 +83,8 @@
 }
 
 .linen-site .linen-nav-dropdown-list--columns,
-.linen-site .linen-nav-dropdown-list--modules {
+.linen-site .linen-nav-dropdown-list--modules,
+.linen-site .linen-nav-dropdown-list--apps {
   grid-template-columns: repeat(2, minmax(13rem, 1fr));
 }
 
