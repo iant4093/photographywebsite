@@ -349,6 +349,12 @@
   letter-spacing: 0.08em;
 }
 
+.linen-site .linen-hero .linen-text-link:is(:hover, :focus-visible) {
+  border-color: white;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateX(0.25rem);
+}
+
 /* Editorial section headers */
 .linen-site .linen-section-heading {
   display: grid;
