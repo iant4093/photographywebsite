@@ -27,6 +27,7 @@ function AlbumCard({
     const intentTimer = useRef(null)
     const hoverController = useRef(null)
     const imageContainer = useRef(null)
+    const cardRef = useRef(null)
     const [coverPreview, setCoverPreview] = useState({ identity: '', srcSet: '' })
     const albumId = album?.albumId || ''
     const coverImageUrl = album?.coverImageUrl || ''
@@ -113,6 +114,31 @@ function AlbumCard({
     // Determine the route: jump directly to video player if only 1 video
     const targetRoute = albumPath(album)
 
+    const updatePointerTilt = (event) => {
+        if (!cardRef.current) return
+        const bounds = cardRef.current.getBoundingClientRect()
+        const x = Math.max(-1, Math.min(1, ((event.clientX - bounds.left) / bounds.width - 0.5) * 2))
+        const y = Math.max(-1, Math.min(1, ((event.clientY - bounds.top) / bounds.height - 0.5) * 2))
+        const softenCenter = (value) => {
+            const deadZone = 0.16
+            const magnitude = Math.abs(value)
+            if (magnitude <= deadZone) return 0
+            const progress = (magnitude - deadZone) / (1 - deadZone)
+            const eased = progress * progress * (3 - 2 * progress)
+            return Math.sign(value) * eased
+        }
+        const tiltX = softenCenter(x)
+        const tiltY = softenCenter(y)
+        cardRef.current.style.setProperty('--album-tilt-x', `${(-tiltY * 2.625).toFixed(2)}deg`)
+        cardRef.current.style.setProperty('--album-tilt-y', `${(tiltX * 3.3).toFixed(2)}deg`)
+    }
+
+    const resetPointerTilt = () => {
+        if (!cardRef.current) return
+        cardRef.current.style.removeProperty('--album-tilt-x')
+        cardRef.current.style.removeProperty('--album-tilt-y')
+    }
+
     const content = (
         <>
             {/* Cover image with warm overlay on hover */}
@@ -182,11 +208,21 @@ function AlbumCard({
         </>
     )
 
-    const className = 'album-card group flex w-full flex-col h-full overflow-hidden transition-shadow duration-300 text-left cursor-pointer'
+    const className = 'album-card album-card--pointer-tilt group flex w-full flex-col h-full overflow-hidden transition-shadow duration-300 text-left cursor-pointer'
 
     if (onOpen) {
         return (
-            <button type="button" data-camera-cursor="photo" onClick={onOpen} onMouseEnter={onMouseEnter} className={className} aria-label={`Open ${album.title}`}>
+            <button
+                ref={cardRef}
+                type="button"
+                data-camera-cursor="photo"
+                onClick={onOpen}
+                onMouseEnter={onMouseEnter}
+                onPointerMove={updatePointerTilt}
+                onPointerLeave={resetPointerTilt}
+                className={className}
+                aria-label={`Open ${album.title}`}
+            >
                 {content}
             </button>
         )
@@ -194,8 +230,11 @@ function AlbumCard({
 
     return (
         <Link
+            ref={cardRef}
             data-camera-cursor="photo"
             to={targetRoute}
+            onPointerMove={updatePointerTilt}
+            onPointerLeave={resetPointerTilt}
             onMouseEnter={() => {
                 if (window.matchMedia(MOBILE_PREVIEW_QUERY).matches) return
                 onMouseEnter?.()
