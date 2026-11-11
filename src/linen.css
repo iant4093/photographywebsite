@@ -367,6 +367,14 @@
   letter-spacing: 0.08em;
 }
 
+.linen-site .linen-section-heading-no-index > h2 {
+  grid-column: 2;
+}
+
+.linen-site .linen-section-heading-no-index > label {
+  grid-column: 3;
+}
+
 .linen-site .linen-section-heading-compact {
   grid-template-columns: minmax(7rem, 0.26fr) minmax(0, 1fr);
 }
@@ -1035,6 +1043,11 @@
   .linen-site .linen-section-heading {
     grid-template-columns: 1fr;
     gap: 0.45rem;
+  }
+
+  .linen-site .linen-section-heading-no-index > h2,
+  .linen-site .linen-section-heading-no-index > label {
+    grid-column: 1;
   }
 
   .linen-admin .linen-admin-heading {

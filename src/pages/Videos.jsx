@@ -211,8 +211,7 @@ export default function Videos() {
 
             <section className="linen-catalog-paper">
                 <div className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                    <div data-reveal-id="video-projects-header" className="linen-section-heading mb-14 scroll-animate">
-                        <span>Film index</span>
+                    <div data-reveal-id="video-projects-header" className="linen-section-heading linen-section-heading-no-index mb-14 scroll-animate">
                         <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal">Video Projects</h2>
                         <label className="w-full" htmlFor="video-section-sort">
                             <span className="linen-category-number block mb-1">Sort sections</span>

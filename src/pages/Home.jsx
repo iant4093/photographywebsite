@@ -246,10 +246,9 @@ function Home() {
                 <div
                     id="photo-albums"
                     data-reveal-id="home-photo-header"
-                    className="linen-section-heading mb-14 scroll-animate"
+                    className="linen-section-heading linen-section-heading-no-index mb-14 scroll-animate"
                     style={{ scrollMarginTop: '6rem' }}
                 >
-                    <span>Selected index</span>
                     <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal inline-block">Photo Albums</h2>
                     <label className="w-full" htmlFor="home-section-sort">
                         <span className="linen-category-number block mb-1">Sort sections</span>
