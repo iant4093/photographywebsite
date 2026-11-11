@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -99,6 +99,21 @@ describe('FloatingGallery', () => {
         expect(container.querySelector('.floating-print-wall')).toHaveClass('is-floating-visible')
         expect(container.querySelector('.floating-lane').style.maskImage)
             .toBe('linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)')
+    })
+
+    it('moves a card-only glow without replacing its hover transform', async () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
+        render(<MemoryRouter><FloatingGallery albums={makeAlbums(12)} /></MemoryRouter>)
+        const card = screen.getAllByRole('link')[0]
+        card.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200, height: 300 })
+        card.matches = vi.fn(() => true)
+
+        fireEvent(card, new MouseEvent('pointermove', { bubbles: true, clientX: 210, clientY: 170 }))
+
+        await waitFor(() => expect(card.style.getPropertyValue('--glow')).toBe('100.0% 50.0%'))
+        expect(card.style.getPropertyValue('--floating-tilt')).not.toBe('')
+        fireEvent.pointerLeave(card)
+        expect(card.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
     })
 
     it('slows rather than stops the wall for pointer and keyboard interaction', () => {

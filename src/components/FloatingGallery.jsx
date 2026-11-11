@@ -6,10 +6,8 @@ import useMediaQuery from '../hooks/useMediaQuery'
 import useAlbumIntent from '../hooks/useAlbumIntent'
 import { gallerySessionSeed } from '../utils/gallerySeed'
 import { albumPath } from '../utils/albumRoutes'
+import { handlePointerTilt } from '../utils/pointerTilt'
 
-const TILT_PATTERN = [-0.3, 0.14, 0.28, -0.12]
-const LANE_COUNT = 3
-const MAX_ALBUMS_PER_LANE = 10
 const PAGE_RANDOM_SEED = gallerySessionSeed()
 const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)'
 const EDGE_FADE_STYLE = {
@@ -36,7 +34,7 @@ function galleryAlbumKey(album, index) {
     )
 }
 
-function buildGalleryLanes(albums, maximum = MAX_ALBUMS_PER_LANE, seed = PAGE_RANDOM_SEED) {
+function buildGalleryLanes(albums, maximum = 10, seed = PAGE_RANDOM_SEED) {
     const seen = new Set()
     const randomizedAlbums = albums
         .map((album, index) => ({
@@ -56,7 +54,7 @@ function buildGalleryLanes(albums, maximum = MAX_ALBUMS_PER_LANE, seed = PAGE_RA
     const laneLength = Math.min(maximum, randomizedAlbums.length)
     if (!laneLength) return []
 
-    return Array.from({ length: LANE_COUNT }, (_, laneIndex) => {
+    return Array.from({ length: 3 }, (_, laneIndex) => {
         const start = (laneIndex * laneLength) % randomizedAlbums.length
         return Array.from(
             { length: laneLength },
@@ -65,7 +63,7 @@ function buildGalleryLanes(albums, maximum = MAX_ALBUMS_PER_LANE, seed = PAGE_RA
     })
 }
 
-function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = '' }) {
+function GalleryCard({ album, position, duplicate, responsiveSrcSet }) {
     const intent = useAlbumIntent(album)
     return (
         <Link
@@ -75,7 +73,9 @@ function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = ''
             className="floating-print-card"
             aria-label={`View ${album.title}`}
             tabIndex={duplicate ? -1 : undefined}
-            style={{ '--floating-tilt': `${TILT_PATTERN[position % TILT_PATTERN.length]}deg` }}
+            onPointerMove={handlePointerTilt}
+            onPointerLeave={handlePointerTilt}
+            style={{ '--floating-tilt': `${[-0.3, 0.14, 0.28, -0.12][position % 4]}deg` }}
         >
             <span className="floating-frame-number">{String(position + 1).padStart(2, '0')}</span>
             <ProgressiveImage
@@ -132,7 +132,7 @@ export default function FloatingGallery({ albums }) {
     const compact = useMediaQuery('(pointer: coarse), (max-width: 720px)')
     const [previewSets, setPreviewSets] = useState(() => new Map())
     const albumLanes = useMemo(
-        () => buildGalleryLanes(albums, compact ? 4 : MAX_ALBUMS_PER_LANE),
+        () => buildGalleryLanes(albums, compact ? 4 : 10),
         [albums, compact],
     )
     useEffect(() => {

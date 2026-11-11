@@ -12,13 +12,12 @@ describe('album media pointer tilt', () => {
         const element = card()
 
         update(element, 110, 170)
-        expect(element.style.getPropertyValue('--glow-x')).toBe('50.0%')
-        expect(element.style.getPropertyValue('--glow-y')).toBe('50.0%')
+        expect(element.style.getPropertyValue('--glow')).toBe('50.0% 50.0%')
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
 
         update(element, 210, 170)
-        expect(element.style.getPropertyValue('--glow-x')).toBe('100.0%')
+        expect(element.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('2.64deg')
     })
@@ -31,7 +30,6 @@ describe('album media pointer tilt', () => {
 
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('')
-        expect(element.style.getPropertyValue('--glow-x')).toBe('100.0%')
-        expect(element.style.getPropertyValue('--glow-y')).toBe('0.0%')
+        expect(element.style.getPropertyValue('--glow')).toBe('100.0% 0.0%')
     })
 })

@@ -412,7 +412,7 @@
   transform: scale(calc(1 + var(--editorial-hover-scale)));
 }
 
-.linen-site .album-card::before,
+.linen-site :is(.album-card, .floating-print-card)::before,
 .linen-site .linen-photo-glow {
   position: absolute;
   inset: 0;
@@ -421,9 +421,9 @@
   transition: opacity 220ms ease;
 }
 
-.linen-site .album-card::before {
+.linen-site :is(.album-card, .floating-print-card)::before {
   content: "";
-  background: radial-gradient(105% 135% at var(--glow-x, 50%) var(--glow-y, 50%), rgba(255, 255, 255, 0.075), transparent);
+  background: radial-gradient(105% 135% at var(--glow, 50% 50%), rgba(255, 255, 255, 0.075), transparent);
 }
 
 .linen-site :is(.album-card, .linen-media-frame) {
@@ -448,7 +448,7 @@
     --album-tilt-scale: 1.0072;
   }
 
-  .linen-site .album-card:hover::before,
+  .linen-site :is(.album-card, .floating-print-card):hover::before,
   .linen-site .linen-photo-frame:hover .linen-photo-glow {
     opacity: 1;
   }
@@ -610,7 +610,7 @@
 }
 
 .linen-site .linen-photo-glow {
-  background: radial-gradient(100% 125% at var(--glow-x, 50%) var(--glow-y, 50%), rgba(255, 255, 255, 0.12), transparent);
+  background: radial-gradient(100% 125% at var(--glow, 50% 50%), rgba(255, 255, 255, 0.12), transparent);
 }
 
 .linen-site .linen-user-dashboard > div {
