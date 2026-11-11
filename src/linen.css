@@ -426,7 +426,7 @@
   background: radial-gradient(105% 135% at var(--glow, 50% 50%), rgba(255, 255, 255, 0.075), transparent);
 }
 
-.linen-site :is(.album-card, .linen-media-frame) {
+.linen-site :is(.album-card, .linen-media-frame, .floating-print-card) {
   --album-tilt-x: 0deg;
   --album-tilt-y: 0deg;
   --album-tilt-scale: 1;
@@ -995,6 +995,9 @@
   background: #f4f0e8;
   box-shadow: 0 12px 28px rgba(44, 40, 37, 0.12);
   transform:
+    perspective(800px)
+    rotateX(var(--album-tilt-x))
+    rotateY(var(--album-tilt-y))
     rotate(var(--floating-tilt, 0deg))
     scale(calc(1 + var(--editorial-hover-scale)));
 }
