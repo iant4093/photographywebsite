@@ -1,0 +1,22 @@
+const DEAD_ZONE = 0.16
+
+function softenCenter(value) {
+    const magnitude = Math.abs(value)
+    if (magnitude <= DEAD_ZONE) return 0
+    const progress = Math.min(1, (magnitude - DEAD_ZONE) / (1 - DEAD_ZONE))
+    const eased = progress * progress * (3 - 2 * progress)
+    return Math.sign(value) * eased
+}
+
+export function update(card, clientX, clientY) {
+    const bounds = card.getBoundingClientRect()
+    const x = ((clientX - bounds.left) / bounds.width - 0.5) * 2
+    const y = ((clientY - bounds.top) / bounds.height - 0.5) * 2
+    card.style.setProperty('--album-tilt-x', `${(-softenCenter(y) * 2.625).toFixed(2)}deg`)
+    card.style.setProperty('--album-tilt-y', `${(softenCenter(x) * 3.3).toFixed(2)}deg`)
+}
+
+export function reset(card) {
+    card.style.removeProperty('--album-tilt-x')
+    card.style.removeProperty('--album-tilt-y')
+}

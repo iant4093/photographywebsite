@@ -411,7 +411,7 @@
   transform: scale(calc(1 + var(--editorial-hover-scale)));
 }
 
-.linen-site .album-card--pointer-tilt {
+.linen-site .album-card {
   --album-tilt-x: 0deg;
   --album-tilt-y: 0deg;
   --album-tilt-scale: 1;
@@ -419,7 +419,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .linen-site .album-card--pointer-tilt {
+  .linen-site .album-card {
     animation: none !important;
     transform:
       perspective(800px)
@@ -429,7 +429,7 @@
     transition: transform 120ms ease-out, box-shadow 320ms ease;
   }
 
-  .linen-site .album-card--pointer-tilt:hover {
+  .linen-site .album-card:hover {
     --album-tilt-scale: 1.009;
   }
 }
