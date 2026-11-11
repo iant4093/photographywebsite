@@ -400,6 +400,7 @@
 }
 
 .linen-site .album-card {
+  position: relative;
   padding: 0.42rem;
   overflow: hidden;
   color: var(--color-charcoal);
@@ -409,6 +410,20 @@
     0 0 0 1px rgba(255, 252, 245, 0.62) inset,
     5px 6px 0 rgba(91, 70, 51, 0.075);
   transform: scale(calc(1 + var(--editorial-hover-scale)));
+}
+
+.linen-site .album-card::before,
+.linen-site .linen-photo-glow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.linen-site .album-card::before {
+  content: "";
+  background: radial-gradient(105% 135% at var(--glow-x, 50%) var(--glow-y, 50%), rgba(255, 255, 255, 0.075), transparent);
 }
 
 .linen-site :is(.album-card, .linen-media-frame) {
@@ -431,6 +446,11 @@
 
   .linen-site :is(.album-card, .linen-media-frame):hover {
     --album-tilt-scale: 1.0072;
+  }
+
+  .linen-site .album-card:hover::before,
+  .linen-site .linen-photo-frame:hover .linen-photo-glow {
+    opacity: 1;
   }
 }
 
@@ -587,6 +607,10 @@
 .linen-site .linen-photo-viewport {
   position: absolute;
   inset: 4px;
+}
+
+.linen-site .linen-photo-glow {
+  background: radial-gradient(100% 125% at var(--glow-x, 50%) var(--glow-y, 50%), rgba(255, 255, 255, 0.12), transparent);
 }
 
 .linen-site .linen-user-dashboard > div {

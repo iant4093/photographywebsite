@@ -42,7 +42,7 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                             onError={onMediaError}
                             className="w-full h-full"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-charcoal/12 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                        <div className="linen-photo-glow" />
                     </div>
                 </button>)}
             </div>
