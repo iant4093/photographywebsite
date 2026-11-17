@@ -370,6 +370,77 @@ async function viewerCase(width, failModule = false, kind = 'random') {
     } finally { await context.close() }
 }
 
+async function lightboxStabilityCase(width) {
+    const { context, page, cdp } = await openCase({ width })
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        const { items } = fixture(85)
+        const dialog = page.getByRole('dialog')
+        const flight = page.locator('.lightbox-motion-flight')
+        await page.goto(origin + '/album/' + items[0].albumId)
+        const tile = page.locator('[data-lightbox-item]').nth(3)
+        await tile.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
+        await page.waitForFunction(() => {
+            const tiles = document.querySelectorAll('[data-lightbox-item]')
+            return [2, 3, 4].every(index => tiles[index]?.matches('.editorial-timeline, .is-motion-visible'))
+        })
+        // Sample adjacent tiles. The activated tile has its own hover and morph.
+        const pose = () => page.evaluate(() => {
+            const tiles = document.querySelectorAll('[data-lightbox-item]')
+            return {
+                scroll: window.scrollY,
+                tiles: [2, 4].map(index => {
+                    const { x, y } = tiles[index].getBoundingClientRect()
+                    return { x, y }
+                }),
+            }
+        })
+        if (width >= 500) await tile.hover()
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        const before = await pose()
+        assert.ok(before.scroll > 0, 'The gallery must be scrolled to exercise its scroll timeline')
+        if (width < 500 && engine !== 'firefox') await tile.tap()
+        else await tile.click()
+        await dialog.waitFor()
+        if (engine !== 'webkit' || width >= 500) await page.mouse.wheel(0, 320)
+        await flight.waitFor({ state: 'detached' })
+        const opened = await pose()
+        assert.equal(opened.scroll, before.scroll, 'The modal lock preserves the viewport scroll offset')
+        for (const [index, position] of opened.tiles.entries()) {
+            const xShift = Math.abs(position.x - before.tiles[index].x)
+            const yShift = Math.abs(position.y - before.tiles[index].y)
+            assert.ok(xShift < 1 && yShift < 1, `Neighboring card shifted by ${xShift}px horizontally and ${yShift}px vertically`)
+        }
+        await page.keyboard.press('Escape')
+        await dialog.waitFor({ state: 'hidden' })
+        assert.equal((await pose()).scroll, before.scroll)
+
+        await page.goto(origin + '/')
+        const featured = page.getByRole('button', { name: 'Explore Featured Photos', exact: true })
+        await featured.hover()
+        await featured.click()
+        const assertPhotoOnly = async () => {
+            await flight.waitFor()
+            const layers = await flight.evaluate(element => ({
+                label: element.querySelector('span')?.textContent,
+                keyframes: element.getAnimations().flatMap(animation => animation.effect.getKeyframes()),
+            }))
+            assert.equal(layers.label, undefined, 'The button label should stay on the page')
+            assert.ok(layers.keyframes.some(frame => Number(frame.opacity) === 0), 'The entire image frame fades with the picture')
+            const surfaces = layers.keyframes.filter(frame => frame.backgroundColor !== undefined)
+            assert.ok(surfaces.length && surfaces.every(frame => frame.backgroundColor === 'rgba(0, 0, 0, 0)'),
+                'A text button has no filled flying box')
+        }
+        await assertPhotoOnly()
+        await flight.waitFor({ state: 'detached' })
+        await page.keyboard.press('Escape')
+        await assertPhotoOnly()
+        await dialog.waitFor({ state: 'hidden' })
+        const result = { engine, width, check: 'lightbox preserves neighboring card poses and animates photo-only button morphs', passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
+    } finally { await context.close() }
+}
+
 try {
     const widths = engine === 'firefox' ? [1440] : [1440, 390]
     for (const width of widths) {
@@ -388,6 +459,7 @@ try {
         if (process.env.VISITOR_COMPARE_ONLY === '1') continue
         if (baselineRoot) await stressCase(width, true)
         await stressCase(width)
+        await lightboxStabilityCase(width)
         await viewerCase(width)
         await viewerCase(width, true)
         await viewerCase(width, false, 'featured')

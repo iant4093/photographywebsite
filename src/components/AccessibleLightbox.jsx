@@ -46,14 +46,14 @@ export default function AccessibleLightbox({
 
     useLayoutEffect(() => {
         const dialog = dialogRef.current
-        const useViewportScrollLock = window.matchMedia?.(
+        const focusDialog = window.matchMedia?.(
             '(orientation: landscape) and (max-height: 600px) and (max-width: 1024px) and (pointer: coarse)',
         ).matches === true
         const trigger = document.activeElement
-        const releaseLayer = registerLightboxLayer(dialog, useViewportScrollLock)
+        const releaseLayer = registerLightboxLayer(dialog)
         const releaseMotion = mountLightboxMotion(dialog, () => motionRef.current, trigger)
 
-        const initialFocus = useViewportScrollLock
+        const initialFocus = focusDialog
             ? dialog
             : dialog?.querySelector('[data-lightbox-initial-focus]') || focusableElements(dialog)[0]
         initialFocus?.focus({ preventScroll: true })

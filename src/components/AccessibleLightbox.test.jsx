@@ -79,12 +79,13 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByRole('dialog', { name: 'Album' })).not.toHaveAttribute('inert')
         expect(opener).toHaveFocus()
         expect(container).toHaveAttribute('inert')
-        expect(document.body.style.position).toBe('fixed')
+        expect(document.documentElement.style.overflow).toBe('hidden')
+        expect(document.body.style.position).toBe('')
         expect(document.documentElement).toHaveAttribute('data-lightbox-scroll-lock')
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(screen.queryByRole('dialog')).toBeNull()
         expect(container).not.toHaveAttribute('inert')
-        expect(document.body.style.position).toBe('')
+        expect(document.documentElement.style.overflow).toBe('')
     })
 
     it('releases nested locks when the route unmounts both dialogs together', () => {
@@ -119,7 +120,8 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByTestId('film-scrollbar').style.pointerEvents).toBe('')
         expect(document.documentElement).toHaveAttribute('data-lightbox-scroll-lock')
         expect(document.body.style.overflow).toBe('hidden')
-        expect(document.body.style.position).toBe('fixed')
+        expect(document.documentElement.style.overflow).toBe('hidden')
+        expect(document.body.style.position).toBe('')
 
         const close = screen.getByRole('button', { name: 'Close viewer' })
         const download = screen.getByRole('button', { name: 'Download item' })
@@ -143,8 +145,8 @@ describe('AccessibleLightbox', () => {
 
     it('keeps its original scroll lock across callback rerenders and restores the exact offset', () => {
         window.scrollTo.mockClear()
-        vi.spyOn(window, 'scrollX', 'get').mockReturnValue(11)
-        vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640)
+        const scrollX = vi.spyOn(window, 'scrollX', 'get').mockReturnValue(11)
+        const scrollY = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640)
         const firstClose = vi.fn()
         const secondClose = vi.fn()
         const firstNext = vi.fn()
@@ -156,7 +158,8 @@ describe('AccessibleLightbox', () => {
             </AccessibleLightbox>,
         )
 
-        expect(document.body.style.top).toBe('-640px')
+        expect(document.documentElement.style.overflow).toBe('hidden')
+        expect(document.body.style.position).toBe('')
         rerender(
             <AccessibleLightbox
                 ariaLabel="Stable viewer"
@@ -168,7 +171,8 @@ describe('AccessibleLightbox', () => {
             </AccessibleLightbox>,
         )
         expect(window.scrollTo).not.toHaveBeenCalled()
-        expect(document.body.style.top).toBe('-640px')
+        expect(document.documentElement.style.overflow).toBe('hidden')
+        expect(window.scrollY).toBe(640)
 
         fireEvent.keyDown(window, { key: 'ArrowRight' })
         fireEvent.keyDown(window, { key: 'ArrowLeft' })
@@ -178,9 +182,11 @@ describe('AccessibleLightbox', () => {
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(firstClose).not.toHaveBeenCalled()
         expect(secondClose).toHaveBeenCalledOnce()
+        scrollX.mockReturnValue(0)
+        scrollY.mockReturnValue(0)
         unmount()
-        expect(window.scrollTo).toHaveBeenLastCalledWith(11, 640)
-        expect(document.body.style.top).toBe('')
+        expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 11, top: 640, behavior: 'instant' })
+        expect(document.documentElement.style.overflow).toBe('')
     })
 
     it('keeps the live viewport in place on short coarse-pointer landscape screens', () => {

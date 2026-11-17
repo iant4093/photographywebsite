@@ -52,8 +52,7 @@ function makeFlight(dialog, origin, src, panel) {
         image.src = src
         shell.append(image)
     }
-    const button = origin.kind === 'button' || origin.kind === 'panel'
-    const label = button && origin.element ? document.createElement('span') : null
+    const label = origin.kind === 'panel' && origin.element ? document.createElement('span') : null
     if (label) {
         const style = getComputedStyle(origin.element)
         const children = [...origin.element.childNodes]
@@ -88,6 +87,7 @@ function snapshot(dialog) {
         copy: copy && getComputedStyle(copy).transform,
         flight: shell && shape(shell.getBoundingClientRect(), getComputedStyle(shell), getComputedStyle(shell).backgroundColor),
         image: opacity(shell?.querySelector('img')),
+        flightOpacity: opacity(shell),
         label: labelCss && { left: labelCss.left, top: labelCss.top, opacity: labelCss.opacity, ...labelStyle(labelCss) },
     }
 }
@@ -100,7 +100,7 @@ function runMotion(dialog, { kind, origin, reverse, current, reduced }) {
     const rect = lightboxRect(target)
     const panel = kind === 'panel' || kind === 'museum'
     const museum = kind === 'museum'
-    const button = origin?.kind === 'button' || origin?.kind === 'panel'
+    const photoButton = kind === 'photo' && origin?.kind === 'button'
     const targetImage = target?.querySelector('.linen-lightbox-photo')
     const src = kind === 'video' ? (origin?.image || target?.poster)
         : panel ? origin?.image : (targetImage?.currentSrc || targetImage?.src)
@@ -126,9 +126,10 @@ function runMotion(dialog, { kind, origin, reverse, current, reduced }) {
         const from = origin.rect
         const targetStyle = getComputedStyle(target)
         const sourceStyle = origin.visual?.isConnected ? getComputedStyle(origin.visual) : null
-        const background = origin.background === clear && origin.element
+        const sourceBackground = origin.background === clear && origin.element
             ? (sourceStyle?.getPropertyValue('--color-cream-dark').trim() || '#292620') : origin.background
-        const edge = panel && sourceStyle ? insetBorder(sourceStyle) : `0 0 0 1px ${origin.border || clear}`
+        const background = photoButton ? clear : sourceBackground
+        const edge = photoButton ? 'none' : panel && sourceStyle ? insetBorder(sourceStyle) : `0 0 0 1px ${origin.border || clear}`
         const fromShape = shape(from, { borderRadius: origin.radius || '0px' }, background || clear, edge)
         const toShape = shape(rect, targetStyle, panel ? targetStyle.backgroundColor : (background || clear),
             panel ? insetBorder(targetStyle) : targetStyle.boxShadow)
@@ -153,7 +154,7 @@ function runMotion(dialog, { kind, origin, reverse, current, reduced }) {
         // A utility button stays hidden under its own panel through the end of the close.
         if (origin.element?.isConnected && (sharedLabel || kind === 'panel')) {
             origin.element.dataset.lightboxMotionSource = ''
-        } else if (origin.visual?.isConnected) {
+        } else if (!photoButton && origin.visual?.isConnected) {
             hiddenOrigin = origin.visual
             hiddenOrigin.dataset.lightboxMotionSource = ''
         }
@@ -167,9 +168,10 @@ function runMotion(dialog, { kind, origin, reverse, current, reduced }) {
         if (museum) {
             play(flight.image, reverse ? [{ opacity: current?.image ?? 0 }, { opacity: 0, offset: .45 }, { opacity: 1 }]
                 : [{ opacity: 1 }, { opacity: 0, offset: .57 }, { opacity: 0 }], { easing: 'ease-out' })
-        } else if (button) {
-            play(flight.image, reverse ? [{ opacity: current?.image ?? 1 }, { opacity: 0, offset: .87 }, { opacity: 0 }]
-                : [{ opacity: 0 }, { opacity: 0, offset: .14 }, { opacity: 1, offset: .82 }, { opacity: 1 }])
+        } else if (photoButton) {
+            // The real button stays in place. Fade the picture and its frame together.
+            play(shell, reverse ? [{ opacity: current?.flightOpacity ?? 1 }, { opacity: 0, offset: .7 }, { opacity: 0 }]
+                : [{ opacity: 0 }, { opacity: 0, offset: .12 }, { opacity: 1, offset: .82 }, { opacity: 1 }])
         }
 
         if (panel) {

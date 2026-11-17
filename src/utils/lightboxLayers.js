@@ -30,29 +30,23 @@ function isolateTopLayer() {
     }
 }
 
-export function registerLightboxLayer(dialog, useViewportScrollLock) {
+export function registerLightboxLayer(dialog) {
     const restoreFocus = document.activeElement
     if (!layers.length) {
-        const bodyKeys = ['overflow', 'overscrollBehavior', 'position', 'top', 'left', 'right', 'width']
-        const rootKeys = ['overflow', 'overscrollBehavior']
+        const root = document.documentElement
+        const keys = ['overflow', 'overscrollBehavior']
         pageState = {
-            body: Object.fromEntries(bodyKeys.map(key => [key, document.body.style[key]])),
-            root: Object.fromEntries(rootKeys.map(key => [key, document.documentElement.style[key]])),
-            scroll: [window.scrollX, window.scrollY],
-            hadLock: document.documentElement.hasAttribute('data-lightbox-scroll-lock'),
-            useViewportScrollLock,
+            body: Object.fromEntries(keys.map(key => [key, document.body.style[key]])),
+            root: Object.fromEntries(keys.map(key => [key, root.style[key]])),
+            scroll: { left: window.scrollX, top: window.scrollY },
+            hadLock: root.hasAttribute('data-lightbox-scroll-lock'),
             restoreFocus,
         }
-        document.documentElement.setAttribute('data-lightbox-scroll-lock', '')
-        if (useViewportScrollLock) {
-            Object.assign(document.documentElement.style, { overflow: 'hidden', overscrollBehavior: 'none' })
-            Object.assign(document.body.style, { overflow: 'hidden', overscrollBehavior: 'none' })
-        } else {
-            Object.assign(document.body.style, {
-                overflow: 'hidden', position: 'fixed', top: `-${pageState.scroll[1]}px`,
-                left: `-${pageState.scroll[0]}px`, right: '0', width: '100%',
-            })
-        }
+        // Keep the root's scroll position and scroll-linked card poses intact.
+        const lock = { overflow: 'hidden', overscrollBehavior: 'none' }
+        root.setAttribute('data-lightbox-scroll-lock', '')
+        Object.assign(root.style, lock)
+        Object.assign(document.body.style, lock)
     }
     const layer = { dialog, restoreFocus }
     layers.push(layer)
@@ -78,7 +72,8 @@ export function registerLightboxLayer(dialog, useViewportScrollLock) {
         Object.assign(document.documentElement.style, pageState.root)
         if (!pageState.hadLock) document.documentElement.removeAttribute('data-lightbox-scroll-lock')
         pageState.restoreFocus?.focus?.({ preventScroll: true })
-        if (!pageState.useViewportScrollLock) window.scrollTo(...pageState.scroll)
+        const { left, top } = pageState.scroll
+        if (window.scrollX !== left || window.scrollY !== top) window.scrollTo({ left, top, behavior: 'instant' })
         pageState = null
     }
 }
