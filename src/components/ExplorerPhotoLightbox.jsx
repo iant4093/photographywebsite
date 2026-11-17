@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import AccessibleLightbox from './AccessibleLightbox'
+import { requestLightboxClose } from '../utils/lightboxMotionControl'
 import PhotoLightboxNavigation from './PhotoLightboxNavigation'
 import PhotoZoomFrame from './PhotoZoomFrame'
 import LightboxShareButton from './LightboxShareButton'
@@ -148,6 +149,7 @@ export default function ExplorerPhotoLightbox(props) {
     return (
         <AccessibleLightbox
             explicitTabOrder
+            motion={{ kind: 'photo', originKind: 'button', key: imageId }}
             onPointerDownCapture={() => { pointerDown.current = true; lastInput.current = Date.now() }}
             onPointerUpCapture={() => { pointerDown.current = false; lastInput.current = Date.now() }}
             onPointerCancelCapture={() => { pointerDown.current = false }}
@@ -177,7 +179,7 @@ export default function ExplorerPhotoLightbox(props) {
                 onClick={event => {
                     if (event.target.closest('button, a, img, input, select, textarea, [role="button"]')) return
                     event.stopPropagation()
-                    props.onClose()
+                    requestLightboxClose(event.currentTarget, props.onClose)
                 }}>
                 <div className="linen-lightbox-media-stage flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {image ? (

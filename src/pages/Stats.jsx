@@ -1,3 +1,4 @@
+import { rememberVideoNavigation } from '../utils/lightboxNavigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { fetchAlbums, fetchPhotographyStats, prefetchPublicAlbum } from '../utils/api'
@@ -285,6 +286,7 @@ function TimelineCard({ album, index, position }) {
             className="photo-stats-timeline-card"
             data-timeline-position={position}
             to={albumRoute(album)}
+            onClick={event => rememberVideoNavigation(albumRoute(album), event, imageContainer.current)}
             aria-label={`View ${album.title}`}
             onPointerMove={handlePointerTilt}
             onPointerLeave={handlePointerTilt}

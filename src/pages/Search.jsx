@@ -1,3 +1,4 @@
+import { rememberVideoLink } from '../utils/lightboxNavigation'
 import SiteSelect from '../components/SiteSelect'
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router'
@@ -25,7 +26,7 @@ const SEARCH_CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 10
 
 const SearchResults = memo(function SearchResults({ albums }) {
     return <div className="archive-search-results">
-        {albums.map(album => <AlbumCard key={album.albumId} album={album} imageSizes={SEARCH_CARD_SIZES} />)}
+        {albums.map(album => <AlbumCard key={album.albumId} album={album} onNavigate={rememberVideoLink} imageSizes={SEARCH_CARD_SIZES} />)}
     </div>
 })
 

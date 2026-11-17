@@ -1,3 +1,4 @@
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import useNavigationState from '../hooks/useNavigationState'
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
@@ -197,7 +198,11 @@ function ExploreCard({ item, index, mode, onOpen }) {
             type="button"
             className="explore-photo-card linen-media-frame linen-photo-frame editorial-motion-media"
             data-camera-cursor="photo"
-            onClick={() => onOpen(index)}
+            data-lightbox-item={mediaId(item)}
+            onClick={event => {
+                rememberLightboxTrigger(event.currentTarget, 'photo', mediaId(item))
+                onOpen(index)
+            }}
             onPointerMove={handlePointerTilt}
             onPointerLeave={handlePointerTilt}
             aria-label={`View photo from ${item.albumTitle}`}
@@ -236,7 +241,7 @@ function ExploreGrid({ items, mode, onOpen, updating }) {
     return (
         <div className={`explore-results-stage${updating ? ' is-updating' : ''}`} aria-busy={updating}>
             {updating && <span className="explore-results-updating" role="status">Updating photographs…</span>}
-            <div className="explore-grid" inert={updating ? true : undefined}>
+            <div className="explore-grid" data-lightbox-grid inert={updating ? true : undefined}>
                 {items.map((item, index) => (
                     <ExploreCard
                         key={`${item.albumId}:${mediaId(item)}`}

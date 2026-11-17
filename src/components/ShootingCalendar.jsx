@@ -1,3 +1,4 @@
+import { rememberVideoNavigation } from '../utils/lightboxNavigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { albumCoverUrl } from '../utils/mediaUrls'
@@ -100,7 +101,7 @@ export default function ShootingCalendar({ calendar, albums, routeFor, today }) 
                             <ul>
                                 {selectedAlbums.map((album) => (
                                     <li key={album.albumId}>
-                                        <Link to={routeFor(album)}>
+                                        <Link to={routeFor(album)} onClick={event => rememberVideoNavigation(routeFor(album), event, event.currentTarget.querySelector('img'))}>
                                             {albumCoverUrl(album) ? <img src={albumCoverUrl(album)} alt="" loading="lazy" decoding="async" /> : <span className="shooting-calendar-day-blank" />}
                                             <span>
                                                 <strong>{album.title || 'Untitled album'}</strong>

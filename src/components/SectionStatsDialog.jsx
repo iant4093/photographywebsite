@@ -9,10 +9,11 @@ function dateLabel(value) {
     })
 }
 
-export default function StatsDialog({ category, onClose }) {
+export default function StatsDialog({ category, motionOrigin, onClose }) {
     const [stats, setStats] = useState(null)
     const [error, setError] = useState(false)
     const [attempt, setAttempt] = useState(0)
+    const [opened, setOpened] = useState(false)
 
     useEffect(() => {
         const controller = new AbortController()
@@ -51,31 +52,34 @@ export default function StatsDialog({ category, onClose }) {
         : 'Not recorded'
 
     return (
-        <AccessibleLightbox ariaLabel={`${category} statistics`} onClose={onClose} className="section-stats-lightbox">
-            <section className="linen-site section-stats-panel" data-theme={document.documentElement.dataset.theme}>
-                <header className="section-stats-heading">
-                    <div>
-                        <p className="section-stats-eyebrow">Section statistics · All years</p>
-                        <h2>{category}</h2>
-                    </div>
-                    <button type="button" className="section-stats-close" aria-label="Close section statistics" onClick={onClose}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-                    </button>
-                </header>
-                {error && <div role="alert" className="section-stats-message">
-                    <p>{stats ? 'Stats could not be refreshed. Showing the last loaded counts.' : 'Stats could not be loaded.'}</p>
-                    <button type="button" onClick={() => setAttempt(value => value + 1)}>Try again</button>
-                </div>}
-                {!stats && !error && <p role="status" className="section-stats-message">Loading statistics…</p>}
-                {stats && <dl className="section-stats-list">
-                    <dt>Date range</dt><dd>{dateRange}</dd>
-                    <dt>Albums</dt><dd>{stats.albumCount.toLocaleString()}</dd>
-                    <dt>Photos</dt><dd>{stats.photoCount.toLocaleString()}</dd>
-                    <dt>{stats.cameras.length > 1 ? 'Cameras used' : 'Camera used'}</dt>
-                    <dd>{stats.cameras.join(' · ') || 'Not recorded'}</dd>
-                    <dt>Lenses used</dt>
-                    <dd>{stats.lenses.length ? <ul>{stats.lenses.map(([name, count]) => <li key={name}>{name} ({count})</li>)}</ul> : 'Not recorded'}</dd>
-                </dl>}
+        <AccessibleLightbox ariaLabel={`${category} statistics`} onClose={onClose}
+            motion={{ kind: 'panel', origin: motionOrigin, onOpened: () => setOpened(true) }} className="section-stats-lightbox">
+            <section data-lightbox-panel className="linen-site section-stats-panel" data-theme={document.documentElement.dataset.theme}>
+                <div data-lightbox-copy>
+                    <header className="section-stats-heading">
+                        <div>
+                            <p className="section-stats-eyebrow"><span data-lightbox-label>Section statistics</span> · All years</p>
+                            <h2>{category}</h2>
+                        </div>
+                        <button type="button" className="section-stats-close" aria-label="Close section statistics" onClick={onClose}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                        </button>
+                    </header>
+                    {opened && error && <div role="alert" className="section-stats-message">
+                        <p>{stats ? 'Stats could not be refreshed. Showing the last loaded counts.' : 'Stats could not be loaded.'}</p>
+                        <button type="button" onClick={() => setAttempt(value => value + 1)}>Try again</button>
+                    </div>}
+                    {(!opened || (!stats && !error)) && <p role="status" className="section-stats-message">Loading statistics…</p>}
+                    {opened && stats && <dl className="section-stats-list">
+                        <dt>Date range</dt><dd>{dateRange}</dd>
+                        <dt>Albums</dt><dd>{stats.albumCount.toLocaleString()}</dd>
+                        <dt>Photos</dt><dd>{stats.photoCount.toLocaleString()}</dd>
+                        <dt>{stats.cameras.length > 1 ? 'Cameras used' : 'Camera used'}</dt>
+                        <dd>{stats.cameras.join(' · ') || 'Not recorded'}</dd>
+                        <dt>Lenses used</dt>
+                        <dd>{stats.lenses.length ? <ul>{stats.lenses.map(([name, count]) => <li key={name}>{name} ({count})</li>)}</ul> : 'Not recorded'}</dd>
+                    </dl>}
+                </div>
             </section>
         </AccessibleLightbox>
     )

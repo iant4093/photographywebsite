@@ -1,3 +1,4 @@
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import useNavigationState from '../hooks/useNavigationState'
 import SiteSelect from '../components/SiteSelect'
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
@@ -23,7 +24,7 @@ import {
     addImagesToAlbum,
     updateImageThumbnail,
 } from '../utils/api'
-import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
+import { mediaDisplayUrl, mediaId, mediaThumbnailUrl } from '../utils/mediaUrls'
 import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { PUBLISH_CHECK_MINUTES, formatPublishAt, localDateTimeValue, publishAtIso, publishScheduleError } from '../utils/publishSchedule'
@@ -1342,7 +1343,7 @@ function ManageAlbums() {
                                                         <p className="text-center py-8 text-warm-gray">No items yet.</p>
                                                     ) : (
                                                         <>
-                                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
+                                                            <div data-lightbox-grid className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
                                                                 {albumImages.map((img, idx) => {
                                                                     const thumbUrl = mediaThumbnailUrl(img)
                                                                     const imgKey = img.rawKey || img.key || img.id || `fallback-${idx}`
@@ -1351,16 +1352,21 @@ function ManageAlbums() {
                                                                     return (
                                                                         <div
                                                                             key={imgKey}
+                                                                            data-lightbox-item={mediaId(img)}
                                                                             tabIndex={0}
                                                                             role="group"
                                                                             aria-label={`Item ${idx + 1} controls`}
                                                                             aria-description={typeFilter === 'photo' ? 'Click the photo or press Enter to view it larger.' : undefined}
                                                                             onClick={(event) => {
-                                                                                if (typeFilter === 'photo' && !event.target.closest('button')) setLightboxImageKey(photoSelectionKey(img, idx))
+                                                                                if (typeFilter === 'photo' && !event.target.closest('button')) {
+                                                                                    rememberLightboxTrigger(event.currentTarget, 'photo', mediaId(img))
+                                                                                    setLightboxImageKey(photoSelectionKey(img, idx))
+                                                                                }
                                                                             }}
                                                                             onKeyDown={(event) => {
                                                                                 if (typeFilter === 'photo' && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                                                                                     event.preventDefault()
+                                                                                    rememberLightboxTrigger(event.currentTarget, 'photo', mediaId(img))
                                                                                     setLightboxImageKey(photoSelectionKey(img, idx))
                                                                                 }
                                                                             }}

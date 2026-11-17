@@ -1,0 +1,62 @@
+.linen-lightbox[data-lightbox-awaiting] {
+    animation: lightbox-await-backdrop 150ms ease-out both;
+}
+
+@keyframes lightbox-await-backdrop {
+    from { background-color: transparent; }
+    to { background-color: rgb(23 22 19 / 52%); }
+}
+
+.linen-lightbox:is([data-lightbox-awaiting], [data-lightbox-travelling="photo"]) .linen-lightbox-photo-frame {
+    visibility: hidden;
+    transition: none;
+}
+
+.linen-lightbox[data-lightbox-awaiting] :is(.linen-lightbox-previous, .linen-lightbox-next, .linen-lightbox-metadata, .linen-lightbox-actions, .site-video-controls) {
+    opacity: 0;
+}
+
+.linen-video-lightbox:is([data-lightbox-awaiting], [data-lightbox-travelling="video"]) :is(.linen-lightbox-content, .site-video-player) {
+    background: transparent;
+    box-shadow: none;
+}
+.linen-video-lightbox:is([data-lightbox-awaiting], [data-lightbox-travelling="video"]) .site-video-player > video {
+    visibility: hidden;
+}
+
+.linen-lightbox > .lightbox-motion-flight {
+    position: fixed;
+    z-index: 9;
+    overflow: hidden;
+    pointer-events: none;
+}
+.lightbox-motion-flight > img { width: 100%; height: 100%; object-fit: cover; }
+.lightbox-motion-flight > span { position: absolute; inset: 0; display: flex; align-items: center; white-space: nowrap; }
+.lightbox-motion-flight > span.lightbox-motion-shared-label { display: block; inset: auto; }
+[data-lightbox-label] { display: inline-block; }
+.linen-lightbox[data-lightbox-shared-label] [data-lightbox-panel] [data-lightbox-label] { visibility: hidden; }
+[data-lightbox-motion-source] { opacity: 0 !important; }
+
+.linen-lightbox > .lightbox-motion-panel-flight { z-index: 0; }
+.linen-lightbox:is([data-lightbox-travelling="panel"], [data-lightbox-travelling="museum"]) > [data-lightbox-panel] {
+    position: relative;
+    z-index: 1;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.linen-qr-lightbox .linen-qr-card {
+    align-self: center;
+    border-color: var(--color-warm-border);
+}
+.linen-qr-lightbox[data-lightbox-travelling="panel"] .linen-qr-card { border-color: transparent; }
+[data-lightbox-qr] {
+    margin-inline: auto;
+    width: min(100%, 240px);
+    height: auto;
+    aspect-ratio: 1;
+    object-fit: contain;
+}
+
+.linen-lightbox[data-lightbox-booting] { opacity: 0; }

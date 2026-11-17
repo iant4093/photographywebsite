@@ -45,7 +45,7 @@ function UserDashboard() {
     const selectedImageScopeRef = useRef(null)
 
     // Each photo section owns its lightbox navigation.
-    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(images)
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev, motionOrigin } = usePhotoSections(images)
 
     // Save scroll position before entering an album detail view
     const savedScrollY = useRef(0)
@@ -159,7 +159,7 @@ function UserDashboard() {
     const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId: selectedAlbum?.albumId, getIdToken })
 
     // Open photo album to view images inline
-    async function openAlbum(album, { randomPhoto = false } = {}) {
+    async function openAlbum(album, { randomPhoto = false, origin } = {}) {
         savedScrollY.current = window.scrollY
         selectedImageScopeRef.current?.controller.abort()
         selectedImageScopeRef.current = null
@@ -178,7 +178,7 @@ function UserDashboard() {
         setMediaError('')
         const loadedImages = await loadSelectedImages(album).catch(() => [])
         if (randomPhoto && loadedImages.length && selectedImageScopeRef.current?.albumId === album.albumId) {
-            openPhoto(loadedImages[Math.floor(Math.random() * loadedImages.length)])
+            openPhoto(loadedImages[Math.floor(Math.random() * loadedImages.length)], origin)
         }
     }
 
@@ -397,6 +397,7 @@ function UserDashboard() {
                 <PhotoLightbox
                     images={lightboxImages}
                     index={lightboxIndex}
+                    motionOrigin={motionOrigin}
                     ariaLabel={`Photo viewer for ${selectedAlbum?.title || 'private album'}`}
                     onClose={closeLightbox}
                     onNext={goNext}

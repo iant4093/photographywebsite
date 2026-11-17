@@ -6,7 +6,6 @@ import { Link } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
-import FloatingGallery from '../components/FloatingGallery'
 import {
     fetchAlbumsPage,
 } from '../utils/api'
@@ -22,6 +21,7 @@ import { isRevealed, markAsRevealed } from '../utils/scroll'
 import {
     currentHeroSrcSet,
     currentHeroUrl,
+    albumCoverUrl,
     heroCoverUrl,
     heroManifestSrcSet,
     heroManifestImageUrl,
@@ -34,6 +34,7 @@ import usePublishedHero from '../hooks/usePublishedHero'
 import { heroImageSizes } from '../utils/heroImageSizes'
 
 const CATALOG_KEY = 'public-photos'
+const FloatingGallery = lazy(() => import('../components/FloatingGallery'))
 const FeaturedPhotoExplorer = lazy(() => import('../components/FeaturedPhotoExplorer'))
 const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
 // Fetch the complete current public catalog in one compressed response while
@@ -241,7 +242,15 @@ function Home() {
             </section>
 
             <section id="albums" className="max-w-7xl mx-auto px-6 pt-10 pb-16 md:pt-14 md:pb-24">
-                <FloatingGallery albums={photoAlbums} />
+                <Suspense fallback={photoAlbums.some(albumCoverUrl) ? (
+                    <div className="floating-print-wall" aria-hidden="true">
+                        <div className="floating-stage">
+                            {[0, 1, 2].map(lane => <div className="floating-lane" key={lane}><div className="floating-print-card invisible" /></div>)}
+                        </div>
+                    </div>
+                ) : null}>
+                    <FloatingGallery albums={photoAlbums} />
+                </Suspense>
 
                 <div
                     id="photo-albums"

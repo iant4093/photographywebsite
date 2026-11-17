@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ExplorerPhotoLightbox from './ExplorerPhotoLightbox'
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import { warmExplorerViewer } from '../utils/explorerViewer'
 import { fetchFeaturedPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
@@ -151,7 +152,7 @@ function FeaturedPhotoSession({ category = '', variant = 'link', showLabel = fal
     const handleOpen = useCallback((event) => {
         // Safari touch/click activation does not always focus buttons. Give
         // either viewer implementation the same explicit return-focus target.
-        event?.currentTarget?.focus({ preventScroll: true })
+        rememberLightboxTrigger(event?.currentTarget, 'button')
         warmExplorerViewer()
         openRef.current = true
         setOpen(true)

@@ -23,6 +23,7 @@ import AlbumShareButton from '../components/AlbumShareButton'
 import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import AccessibleLightbox from '../components/AccessibleLightbox'
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import PhotoLightbox from '../components/PhotoLightbox'
 import LightboxShareButton from '../components/LightboxShareButton'
 import { openPrintOrder } from '../utils/printOrders'
@@ -386,7 +387,7 @@ export default function SharedAlbum({ theme = 'light' }) {
                     <AlbumPhotoSections sections={sections} albumTitle={album.title} onOpen={openPhoto}
                         onMediaError={() => requestMediaRefresh('media-error')} />
                 ) : (
-                    <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div data-lightbox-grid className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {images.map((img, index) => {
                             const thumbUrl = mediaThumbnailUrl(img)
 
@@ -397,7 +398,11 @@ export default function SharedAlbum({ theme = 'light' }) {
                                     type="button"
                                     key={mediaId(img) || index}
                                     className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative text-left"
-                                    onClick={() => openPhoto(img)}
+                                    data-lightbox-item={mediaId(img)}
+                                    onClick={event => {
+                                        rememberLightboxTrigger(event.currentTarget, 'video', mediaId(img))
+                                        openPhoto(img)
+                                    }}
                                     onPointerMove={handlePointerTilt}
                                     onPointerLeave={handlePointerTilt}
                                     aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
@@ -461,6 +466,7 @@ export default function SharedAlbum({ theme = 'light' }) {
 
             {lightboxIndex !== null && activeImages[lightboxIndex] && album.type === 'video' && (
                 <AccessibleLightbox
+                    motion={{ kind: 'video', key: mediaId(activeImages[lightboxIndex]) }}
                     ariaLabel={`Video player for ${album.title}`}
                     onClose={closeLightbox}
                     onNext={images.length > 1 ? goNext : undefined}

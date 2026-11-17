@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import './AccessibleLightbox.css'
+import './LightboxMotion.css'
 import { registerLightboxLayer } from '../utils/lightboxLayers'
+import { mountLightboxMotion, requestLightboxClose, settleLightboxEntrance } from '../utils/lightboxMotionControl'
 
 const FOCUSABLE_SELECTOR = [
     'a[href]',
@@ -30,21 +32,26 @@ export default function AccessibleLightbox({
     onPointerUpCapture,
     onPointerCancelCapture,
     onKeyDownCapture,
+    motion,
 }) {
     const dialogRef = useRef(null)
     const callbacksRef = useRef({ onClose, onNext, onPrevious })
+    const motionRef = useRef(motion)
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
     useLayoutEffect(() => {
         callbacksRef.current = { onClose, onNext, onPrevious }
-    }, [onClose, onNext, onPrevious])
+        motionRef.current = motion
+    }, [onClose, onNext, onPrevious, motion])
 
     useLayoutEffect(() => {
         const dialog = dialogRef.current
         const useViewportScrollLock = window.matchMedia?.(
             '(orientation: landscape) and (max-height: 600px) and (max-width: 1024px) and (pointer: coarse)',
         ).matches === true
+        const trigger = document.activeElement
         const releaseLayer = registerLightboxLayer(dialog, useViewportScrollLock)
+        const releaseMotion = mountLightboxMotion(dialog, () => motionRef.current, trigger)
 
         const initialFocus = useViewportScrollLock
             ? dialog
@@ -57,20 +64,23 @@ export default function AccessibleLightbox({
             if (event.defaultPrevented || dialog?.hasAttribute('inert')) return
             if (event.key === 'Escape') {
                 event.preventDefault()
-                callbacksRef.current.onClose()
+                requestLightboxClose(dialog, () => callbacksRef.current.onClose())
                 return
             }
             if (event.key === 'ArrowRight' && callbacksRef.current.onNext) {
                 event.preventDefault()
+                settleLightboxEntrance(dialog)
                 callbacksRef.current.onNext()
                 return
             }
             if (event.key === 'ArrowLeft' && callbacksRef.current.onPrevious) {
                 event.preventDefault()
+                settleLightboxEntrance(dialog)
                 callbacksRef.current.onPrevious()
                 return
             }
             if (event.key !== 'Tab') return
+            settleLightboxEntrance(dialog)
 
             const focusable = focusableElements(dialog)
             if (!focusable.length) {
@@ -107,6 +117,7 @@ export default function AccessibleLightbox({
         window.addEventListener('keydown', handleKeyDown)
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
+            releaseMotion?.()
             releaseLayer()
         }
     }, [explicitTabOrder])
@@ -126,8 +137,14 @@ export default function AccessibleLightbox({
             onPointerUpCapture={onPointerUpCapture}
             onPointerCancelCapture={onPointerCancelCapture}
             onKeyDownCapture={onKeyDownCapture}
+            onClickCapture={(event) => {
+                if (!motion || !event.target.closest('.linen-lightbox-close, .section-stats-close, [data-lightbox-close]')) return
+                event.preventDefault()
+                event.stopPropagation()
+                requestLightboxClose(event.currentTarget, () => callbacksRef.current.onClose())
+            }}
             onMouseDown={(event) => {
-                if (event.target === event.currentTarget) onClose()
+                if (event.target === event.currentTarget) requestLightboxClose(event.currentTarget, () => callbacksRef.current.onClose())
             }}
         >
             {children}

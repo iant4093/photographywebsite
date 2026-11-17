@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router'
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router'
 import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import AccessibleLightbox from '../components/AccessibleLightbox'
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
+import { takeVideoNavigation } from '../utils/lightboxNavigation'
 import LightboxShareButton from '../components/LightboxShareButton'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
@@ -37,6 +39,8 @@ export default function VideoGallery() {
 
 function VideoGalleryContent({ albumId }) {
     const navigate = useNavigate()
+    const location = useLocation()
+    const initialRoute = useRef(location.pathname + location.search)
     const [searchParams, setSearchParams] = useSearchParams()
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
@@ -54,6 +58,7 @@ function VideoGalleryContent({ albumId }) {
 
     // Lightbox state — null means gallery view, a number is the index in the player
     const [lightboxIndex, setLightboxIndex] = useState(null)
+    const [motionOrigin, setMotionOrigin] = useState(null)
 
     const loadAlbum = useCallback(async ({ signal, background = false } = {}) => {
         if (!background) setLoading(true)
@@ -79,7 +84,10 @@ function VideoGalleryContent({ albumId }) {
                     ? fetchedImages.findIndex(video => mediaId(video) === sharedVideo.videoId)
                     : -1
                 if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
-                else if (autoPlayFirst && fetchedImages.length > 0) setLightboxIndex(0)
+                else if (autoPlayFirst && fetchedImages.length > 0) {
+                    setMotionOrigin(takeVideoNavigation(initialRoute.current))
+                    setLightboxIndex(0)
+                }
             }
             return data
         } catch (err) {
@@ -300,7 +308,7 @@ function VideoGalleryContent({ albumId }) {
             )}
 
             {/* Thumbnail Grid */}
-            <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div data-lightbox-grid className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {images.map((img, index) => {
                     const thumbUrl = mediaThumbnailUrl(img)
                     return (
@@ -310,7 +318,12 @@ function VideoGalleryContent({ albumId }) {
                             type="button"
                             key={mediaId(img) || index}
                             className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-video relative text-left"
-                            onClick={() => setLightboxIndex(index)}
+                            data-lightbox-item={mediaId(img)}
+                            onClick={event => {
+                                setMotionOrigin(null)
+                                rememberLightboxTrigger(event.currentTarget, 'video', mediaId(img))
+                                setLightboxIndex(index)
+                            }}
                             onPointerMove={handlePointerTilt}
                             onPointerLeave={handlePointerTilt}
                             aria-label={`Open video ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
@@ -343,6 +356,7 @@ function VideoGalleryContent({ albumId }) {
             {/* Video Lightbox Player */}
             {lightboxIndex !== null && images[lightboxIndex] && (
                 <AccessibleLightbox
+                    motion={{ kind: 'video', key: mediaId(images[lightboxIndex]), origin: motionOrigin }}
                     ariaLabel={`Video player for ${album.title}`}
                     onClose={closeLightbox}
                     onNext={images.length > 1 ? goNext : undefined}

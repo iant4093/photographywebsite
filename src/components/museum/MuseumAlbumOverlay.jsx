@@ -24,17 +24,18 @@ class AlbumContentBoundary extends Component {
     }
 }
 
-export default function MuseumAlbumOverlay({ album, onClose, onReturn }) {
+export default function MuseumAlbumOverlay({ album, motionOrigin, onClose, onReturn }) {
     // The lightbox portal sits outside App's themed container. Follow the
     // document preference so the same palette and photo-frame rules apply here.
     const theme = useSyncExternalStore(subscribeToDocumentTheme, readDocumentTheme, () => 'light')
 
     return (
-        <AccessibleLightbox ariaLabel={`${album.title || 'Photography'} album`} className="museum-album-overlay" onClose={onClose}>
-            <section className="linen-site museum-album-panel" data-theme={theme}>
+        <AccessibleLightbox ariaLabel={`${album.title || 'Photography'} album`} className="museum-album-overlay"
+            motion={{ kind: 'museum', origin: motionOrigin }} onClose={onClose}>
+            <section data-lightbox-panel className="linen-site museum-album-panel" data-theme={theme}>
                 <header className="museum-album-toolbar">
                     <button type="button" data-lightbox-initial-focus onClick={onReturn}>← Return to gallery</button>
-                    <button type="button" aria-label="Close album" onClick={onClose}>×</button>
+                    <button type="button" aria-label="Close album" data-lightbox-close onClick={onClose}>×</button>
                 </header>
                 <div className="museum-album-scroll">
                     <AlbumContentBoundary>

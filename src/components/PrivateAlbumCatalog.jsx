@@ -1,3 +1,5 @@
+import { rememberVideoNavigation } from '../utils/lightboxNavigation'
+import { albumPath } from '../utils/albumRoutes'
 import useNavigationState from '../hooks/useNavigationState'
 import { useId, useMemo } from 'react'
 import AlbumCard from './AlbumCard'
@@ -7,6 +9,7 @@ import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { HOME_SECTION_SORT_OPTIONS, sortHomePhotoSections } from '../utils/homeSectionSort'
 import { markAsRevealed } from '../utils/scroll'
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 
 // Everything here is derived from the authenticated owner's catalog. Public
 // section stats and discovery endpoints must not be used for private galleries.
@@ -24,7 +27,7 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
     ), [grouped, sort])
     const { sections, setCategoryYear } = useAlbumYearFilters(grouped, `private-${mediaType}`)
     const mediaLabel = mediaType === 'video' ? 'videos' : 'photos'
-    const shuffleSection = category => {
+    const shuffleSection = (category, trigger) => {
         const candidates = grouped[category].filter(album => album.imageCount !== 0)
         const total = candidates.reduce((sum, album) => sum + Math.max(1, Number(album.imageCount) || 1), 0)
         let position = Math.random() * total
@@ -32,7 +35,7 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
             position -= Math.max(1, Number(album.imageCount) || 1)
             return position < 0
         })
-        if (selected) onOpen(selected, { randomPhoto: true })
+        if (selected) onOpen(selected, { randomPhoto: true, origin: rememberLightboxTrigger(trigger, 'button') })
     }
     return <div>
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
@@ -61,7 +64,7 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
                         {mediaType === 'photo' && <button type="button" className="linen-theme-toggle"
                             aria-label={`Shuffle ${category} photos`} title={`Shuffle ${category} photos`}
                             disabled={!grouped[category].some(album => album.imageCount !== 0)}
-                            onClick={() => shuffleSection(category)}>
+                            onClick={event => shuffleSection(category, event.currentTarget)}>
                             <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                                 <path d="M3 7h3c4 0 8 10 12 10h3M17 13l4 4-4 4M3 17h3c1.5 0 3-1.5 4.5-3.5M13.5 10.5C15 8.5 16.5 7 18 7h3M17 3l4 4-4 4" />
                             </svg>
@@ -81,7 +84,10 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
                     </div>
                     <ScrollRow key={year} scrollKey={`user-${mediaType}-${category}${year === 'all' ? '' : `-year-${year}`}`}>
                         {visibleAlbums.map(album => <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child">
-                            <AlbumCard album={album} onOpen={() => onOpen(album)} onImageError={onMediaError}
+                            <AlbumCard album={album} onOpen={event => {
+                                if (mediaType === 'video') rememberVideoNavigation(albumPath(album), event, event.currentTarget.querySelector('.album-card-image'))
+                                onOpen(album)
+                            }} onImageError={onMediaError}
                                 onMouseEnter={() => markAsRevealed(`user-album-${album.albumId}`)} />
                         </div>)}
                     </ScrollRow>

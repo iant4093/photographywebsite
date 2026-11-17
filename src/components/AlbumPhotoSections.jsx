@@ -1,5 +1,6 @@
 import { memo, useId } from 'react'
 import ProgressiveImage from './ProgressiveImage'
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import { mediaId, mediaPreviewSrcSet, mediaThumbnailUrl } from '../utils/mediaUrls'
 import { handlePointerTilt } from '../utils/pointerTilt'
 
@@ -13,14 +14,18 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                 <h2 id={`${id}-${section.key}`} className="font-serif text-2xl text-charcoal">{section.title}</h2>
                 <span className="text-sm text-warm-gray">{section.images.length} photos</span>
             </div>}
-            <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div data-lightbox-grid className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {section.images.map((img, index) => <button
                     data-camera-cursor="photo"
                     data-page-scroll-media
                     type="button"
                     key={mediaId(img) || index}
                     className="album-photo-tile linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
-                    onClick={() => onOpen(img)}
+                    data-lightbox-item={mediaId(img)}
+                    onClick={event => {
+                        rememberLightboxTrigger(event.currentTarget, 'photo', mediaId(img))
+                        onOpen(img)
+                    }}
                     onPointerMove={handlePointerTilt}
                     onPointerLeave={handlePointerTilt}
                     onPointerEnter={onIntent ? () => onIntent(img, false) : undefined}

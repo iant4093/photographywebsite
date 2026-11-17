@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AccessibleLightbox from './AccessibleLightbox'
+import { requestLightboxClose } from '../utils/lightboxMotionControl'
 import {
     mediaBeforeDisplayUrl,
     mediaBeforeSrcSet,
@@ -83,6 +84,7 @@ function PhotoLightbox({
     emptyMessage = '',
     adminControls,
     initialImageReady = false,
+    motionOrigin,
     initialComparisonRequested = false,
     initialOriginalReady = false,
     embedded = false,
@@ -355,13 +357,14 @@ function PhotoLightbox({
         // fitted photo and between controls. Only actual content keeps it open.
         if (event.target.closest('button, a, img, input, select, textarea, [role="button"]')) return
         event.stopPropagation()
-        onClose()
+        requestLightboxClose(event.currentTarget, onClose)
     }
 
     const Dialog = embedded ? LightboxContents : AccessibleLightbox
     return (
         <Dialog
             explicitTabOrder
+            motion={{ kind: 'photo', key: activeId, origin: motionOrigin, originKind: motionOrigin?.kind }}
             ariaLabel={ariaLabel}
             onClose={onClose}
             onNext={images.length > 1 && !adminControls?.deleting ? onNext : undefined}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ExplorerPhotoLightbox from './ExplorerPhotoLightbox'
+import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import { warmExplorerViewer } from '../utils/explorerViewer'
 import SectionStats from './SectionStats'
 import { fetchRandomPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
@@ -150,7 +151,7 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
 
     const handleOpen = useCallback((event) => {
         // Keep focus restoration consistent on touch and Safari as well.
-        event?.currentTarget?.focus({ preventScroll: true })
+        rememberLightboxTrigger(event?.currentTarget, 'button')
         warmExplorerViewer()
         openRef.current = true
         setOpen(true)

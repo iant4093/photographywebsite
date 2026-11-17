@@ -15,6 +15,7 @@ import { handlePointerTilt } from '../utils/pointerTilt'
 function AlbumCard({
     album,
     onOpen,
+    onNavigate,
     onImageError,
     onMouseEnter,
     showNewFlag = false,
@@ -207,6 +208,7 @@ function AlbumCard({
         <Link
             data-camera-cursor="photo"
             to={targetRoute}
+            onClick={onNavigate}
             onPointerMove={handlePointerTilt}
             onPointerLeave={handlePointerTilt}
             onMouseEnter={() => {

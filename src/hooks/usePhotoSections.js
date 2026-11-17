@@ -7,6 +7,7 @@ const EMPTY_IMAGES = []
 // manifest cannot silently move the viewer to a different photo.
 export default function usePhotoSections(images, enabled = true) {
     const [selectedId, setSelectedId] = useState(null)
+    const [motionOrigin, setMotionOrigin] = useState(null)
     const sections = useMemo(() => {
         const featured = enabled ? images.filter(image => image.isFavorite === true) : []
         if (!featured.length) return [{ key: 'all', title: '', images }]
@@ -30,13 +31,19 @@ export default function usePhotoSections(images, enabled = true) {
     const activeImages = selected?.images || EMPTY_IMAGES
     const index = selected?.index ?? -1
     const lightboxIndex = index < 0 ? null : index
-    const openPhoto = useCallback(image => setSelectedId(mediaId(image)), [])
-    const resetLightbox = useCallback(() => setSelectedId(null), [])
+    const openPhoto = useCallback((image, origin) => {
+        setMotionOrigin(origin ?? null)
+        setSelectedId(mediaId(image))
+    }, [])
+    const resetLightbox = useCallback(() => {
+        setSelectedId(null)
+        setMotionOrigin(null)
+    }, [])
     const goNext = useCallback(() => {
         if (activeImages.length) setSelectedId(mediaId(activeImages[(index + 1) % activeImages.length]))
     }, [activeImages, index])
     const goPrev = useCallback(() => {
         if (activeImages.length) setSelectedId(mediaId(activeImages[(index - 1 + activeImages.length) % activeImages.length]))
     }, [activeImages, index])
-    return { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev }
+    return { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev, motionOrigin }
 }

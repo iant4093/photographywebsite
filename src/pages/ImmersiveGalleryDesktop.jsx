@@ -11,6 +11,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { fetchAllAlbums } from '../utils/api'
 import useMuseumPreparation from '../hooks/useMuseumPreparation'
 import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
+import { fitsViewport, rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import {
     buildMuseumCatalog,
     buildMuseumLayout,
@@ -4215,6 +4216,25 @@ function focusedPainting(layout, camera, direction = new THREE.Vector3()) {
     return best
 }
 
+function paintingMotionOrigin(painting, camera, canvas) {
+    const image = albumCoverUrl(painting.album)
+    if (!image) return null
+    const viewport = canvas.getBoundingClientRect()
+    const { width, height } = MUSEUM_ARTWORK_PLANE_GEOMETRY.parameters
+    const scale = new THREE.Vector3(...(painting.scale || [1, 1, 1]))
+    const rotation = new THREE.Euler(0, painting.rotationY, 0)
+    const center = new THREE.Vector3(...painting.position)
+    const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, y]) =>
+        new THREE.Vector3(x * width / 2, y * height / 2, 0).multiply(scale).applyEuler(rotation).add(center).project(camera)
+    )
+    if (corners.some(corner => corner.z < -1 || corner.z > 1)) return null
+    const xs = corners.map(corner => viewport.left + (corner.x + 1) * viewport.width / 2)
+    const ys = corners.map(corner => viewport.top + (1 - corner.y) * viewport.height / 2)
+    const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys)
+    const rect = { left, right, top, bottom, width: right - left, height: bottom - top }
+    return fitsViewport(rect) ? { kind: 'museum', rect, image } : null
+}
+
 function MuseumTouchControls({ input, onPause, riding }) {
     const stick = useRef(null)
     const knob = useRef(null)
@@ -4458,7 +4478,7 @@ function playMuseumFootstep(audio, stepIndex, speedRatio, volume = 1, surface = 
 }
 
 function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchInput, preferences, motionSuppressed, developmentJump, chairs, ride, onWheelchairStatus, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
-    const { camera } = useThree()
+    const { camera, gl } = useThree()
     const wheelchairStatus = useRef('')
     const keys = useRef(new Set())
     const lastRoom = useRef(null)
@@ -4592,7 +4612,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             if (!event.repeat && MUSEUM_MOVEMENT_KEYS.has(event.code)) markMuseumInteractionBusy()
             if (event.code === 'KeyE' && enabled) {
                 const painting = focusedPainting(layout, camera, focusDirection)
-                if (painting) onOpenAlbum(painting.album)
+                if (painting) onOpenAlbum(painting.album, paintingMotionOrigin(painting, camera, gl.domElement))
             }
         }
         const onKeyUp = (event) => {
@@ -4605,7 +4625,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             window.removeEventListener('keydown', onKeyDown)
             window.removeEventListener('keyup', onKeyUp)
         }
-    }, [camera, enabled, focusDirection, layout, onOpenAlbum, ride, touchInput])
+    }, [camera, enabled, focusDirection, gl, layout, onOpenAlbum, ride, touchInput])
 
     useFrame((state, frameDelta) => {
         if (!enabled) return
@@ -5725,6 +5745,7 @@ export default function ImmersiveGalleryDesktop() {
     const [loadVersion, setLoadVersion] = useState(0)
     const [locked, setLocked] = useState(false)
     const [openGalleryAlbum, setOpenGalleryAlbum] = useState(null)
+    const [albumMotionOrigin, setAlbumMotionOrigin] = useState(null)
     const albumOpenRef = useRef(false)
     const [activeRoomId, setActiveRoomId] = useState(null)
     const [activeRoomIds, setActiveRoomIds] = useState(null)
@@ -5873,19 +5894,26 @@ export default function ImmersiveGalleryDesktop() {
     const renderedActiveRoomId = visualPreview && roomPreviewModes.includes(previewMode)
         ? layout.rooms[previewRoomIndex]?.id
         : activeRoomId
-    const openAlbum = useCallback((album) => {
+    const openAlbum = useCallback((album, origin) => {
         if (!album?.albumId) return
         albumOpenRef.current = true
         pauseGallery()
+        setAlbumMotionOrigin(origin ?? null)
         setOpenGalleryAlbum(album)
-    }, [pauseGallery, setOpenGalleryAlbum])
+    }, [pauseGallery, setAlbumMotionOrigin, setOpenGalleryAlbum])
+    const openAlbumFromButton = (album, trigger) => {
+        if (!album?.albumId) return
+        const source = rememberLightboxTrigger(trigger, 'museum')
+        openAlbum(album, source && { ...source, image: albumCoverUrl(album) })
+    }
     const closeAlbum = useCallback(() => {
         albumOpenRef.current = false
+        setAlbumMotionOrigin(null)
         setOpenGalleryAlbum(null)
         // Escape never reacquires pointer lock. The visitor can review the
         // paused scene and resume with an explicit click on Continue exploring.
         requestAnimationFrame(() => document.getElementById('museum-enter')?.focus({ preventScroll: true }))
-    }, [setOpenGalleryAlbum])
+    }, [setAlbumMotionOrigin, setOpenGalleryAlbum])
     const handleSceneReady = useCallback(() => setSceneReady(true), [setSceneReady])
     const updatePreference = useCallback((key, value) => {
         if (key === 'bobStrength') {
@@ -5925,11 +5953,12 @@ export default function ImmersiveGalleryDesktop() {
     }, [pauseGallery, setLocked, touchMode])
     const returnFromAlbum = useCallback(() => {
         albumOpenRef.current = false
+        setAlbumMotionOrigin(null)
         flushSync(() => setOpenGalleryAlbum(null))
         // This button supplies the user gesture browsers require for pointer
         // lock. If it is denied, beginWalkThrough leaves the normal pause UI.
         beginWalkThrough()
-    }, [beginWalkThrough, setOpenGalleryAlbum])
+    }, [beginWalkThrough, setAlbumMotionOrigin, setOpenGalleryAlbum])
     const controlsEnabled = useMemo(() => ({
         locked: locked && !openGalleryAlbum,
         activeRoomId: renderedActiveRoomId,
@@ -6066,7 +6095,7 @@ export default function ImmersiveGalleryDesktop() {
                 </div>
             )}
             {sceneReady && focused && locked && (touchMode ? (
-                <button className="museum-interaction museum-interaction--touch" type="button" onClick={() => openAlbum(focused.album)}>
+                <button className="museum-interaction museum-interaction--touch" type="button" onClick={event => openAlbumFromButton(focused.album, event.currentTarget)}>
                     Open <strong>{focused.album.title}</strong>
                 </button>
             ) : (
@@ -6130,9 +6159,9 @@ export default function ImmersiveGalleryDesktop() {
                     </details>
                 </div>
             )}
-            {openGalleryAlbum && <MuseumAlbumOverlay album={openGalleryAlbum} onClose={closeAlbum} onReturn={returnFromAlbum} />}
+            {openGalleryAlbum && <MuseumAlbumOverlay album={openGalleryAlbum} motionOrigin={albumMotionOrigin} onClose={closeAlbum} onReturn={returnFromAlbum} />}
             {import.meta.env.DEV && visualPreview && sceneReady && (
-                <button className="museum-preview-album" type="button" onClick={() => openAlbum(layout.rooms[previewRoomIndex]?.albums[0])}>Preview album overlay</button>
+                <button className="museum-preview-album" type="button" onClick={event => openAlbumFromButton(layout.rooms[previewRoomIndex]?.albums[0], event.currentTarget)}>Preview album overlay</button>
             )}
         </div>
     )

@@ -1,3 +1,4 @@
+import { rememberVideoLink } from '../utils/lightboxNavigation'
 import { useCallback, useEffect, useRef } from 'react'
 import AlbumCard from './AlbumCard'
 import { prefetchPublicAlbum } from '../utils/api'
@@ -45,7 +46,7 @@ export default function VideoAlbumCard({ album }) {
     return (
         <div ref={wrapperRef} className="h-full" onMouseEnter={() => startPreview()}
             onMouseLeave={() => { if (canRunAlbumPreview()) stopPreview() }}>
-            <AlbumCard album={album} />
+            <AlbumCard album={album} onNavigate={rememberVideoLink} />
         </div>
     )
 }
