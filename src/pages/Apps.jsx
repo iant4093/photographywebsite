@@ -117,7 +117,7 @@ export default function Apps() {
                         <span className="explore-module-number">{String(index + 1).padStart(2, '0')}</span>
                         <AppArt id={module.id} />
                         <div>
-                            <span className="app-status">{module.status ?? (module.comingSoon ? 'Coming soon' : 'Available now')}</span>
+                            <span className="app-status">{module.comingSoon ? 'Coming soon' : 'Available now'}</span>
                             <h2>{module.title}</h2>
                             <p>{module.detail}</p>
                         </div>

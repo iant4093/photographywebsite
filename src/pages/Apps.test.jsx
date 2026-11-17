@@ -138,6 +138,8 @@ describe('Desktop app downloads', () => {
         ['TruongCleaner', 'MacIntel', undefined, 'macOS', 'TruongCleaner.dmg'],
         ['TruongPaper', 'MacIntel', undefined, 'macOS', 'TruongPaper-macOS.dmg', 4],
         ['TruongPaper', 'Win32', undefined, 'Windows', 'TruongPaper-Windows-Setup.exe', 4],
+        ['TruongStream', 'MacIntel', undefined, 'macOS', 'TruongStream-macOS.dmg', 2],
+        ['TruongStream', 'Win32', undefined, 'Windows', 'TruongStream-Windows-Setup.exe', 2],
     ])('selects the primary installer for %s on %s', (title, platform, userAgentData, label, file, screenshotCount = 5) => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform, userAgentData })
         renderApps()
@@ -154,6 +156,7 @@ describe('Desktop app downloads', () => {
         ['truongflix', { platform: 'MacIntel', maxTouchPoints: 5 }, /Visit this page on your Mac or Windows computer/],
         ['truongcleaner', { platform: 'Linux armv8l', userAgent: 'Mozilla/5.0 (Linux; Android 14)' }, /Visit this page on your Mac/],
         ['truongpaper', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
+        ['truongstream', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
     ])('shows desktop guidance for %s on mobile (%j)', (moduleId, device, message) => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue(device)
         renderApps(`/apps/${moduleId}`)
@@ -172,17 +175,14 @@ describe('Desktop app downloads', () => {
         expect(screen.getAllByRole('link', { name: /installer/ }).map(link => link.textContent)).toEqual(installers)
     })
 
-    it('links TruongStream to the latest GitHub release and the source guide', () => {
+    it('marks TruongStream available and links to the installation guide', () => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform: 'MacIntel' })
         renderApps()
         const card = screen.getByRole('link', { name: /TruongStream/ })
-        expect(card).toHaveTextContent('Source available')
+        expect(card).toHaveTextContent('Available now')
         fireEvent.click(card)
         expect(screen.getByRole('heading', { name: 'TruongStream', level: 1 })).toBeInTheDocument()
-        expect(screen.getByText(/Mac and Windows ·/)).toBeInTheDocument()
-        expect(screen.queryByRole('link', { name: /Download for|installer/i })).not.toBeInTheDocument()
-        expect(screen.getByRole('link', { name: /GitHub releases/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongStream/releases/latest')
-        expect(screen.getByRole('link', { name: /Source build guide/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongStream#build-locally')
+        expect(screen.getByRole('link', { name: /Full installation guide/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongStream#install')
         expect(screen.getByText(/simulated camera feed/)).toBeInTheDocument()
     })
 })

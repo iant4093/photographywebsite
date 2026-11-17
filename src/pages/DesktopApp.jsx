@@ -104,8 +104,17 @@ const APPS = {
         title: 'TruongStream',
         intro: 'A USB webcam studio for Mac and Windows. Use a supported Canon, Sony, Nikon, or Fujifilm camera for calls or streaming, with exposure and color controls alongside the live preview.',
         platforms: 'Mac and Windows',
-        downloads: [],
-        setup: 'TruongStream targets Apple silicon Macs on macOS 14.2 or later and 64-bit Windows. The source build guide lists the requirements for building it locally.',
+        downloads: [
+            {
+                platform: 'macos', label: 'macOS', file: 'TruongStream-macOS.dmg', requirement: 'macOS 14.2 or later (Apple silicon)',
+                instructions: 'Open the DMG and drag TruongStream into Applications. If macOS asks you to approve the first launch, follow the installation guide below.',
+            },
+            {
+                platform: 'windows', label: 'Windows', file: 'TruongStream-Windows-Setup.exe', requirement: 'Windows 10 version 1809 or later (x64)',
+                instructions: 'Run the setup file and follow the installer. The installation guide covers the SmartScreen prompt if it appears.',
+            },
+        ],
+        setup: 'Connect a supported camera over USB or plug in an HDMI capture card, then choose your video source in TruongStream.',
         features: [
             'Connect over USB and control shutter speed, aperture, ISO, white balance, and focus as supported by the camera.',
             'Apply built-in color presets or import your own .cube LUT, with a split preview to compare the grade.',
@@ -136,7 +145,6 @@ export default function DesktopApp({ moduleId }) {
     const repository = `https://github.com/iant4093/${app.title}`
     const assets = `/apps/${moduleId}`
     const platform = getPlatform(navigator)
-    const hasInstallers = app.downloads.length > 0
     const download = app.downloads.find(option => option.platform === platform)
     const downloadUrl = file => `${repository}/releases/latest/download/${file}`
     const [heroFile, heroCaption, heroAlt] = app.hero
@@ -152,17 +160,15 @@ export default function DesktopApp({ moduleId }) {
                     <div className="cam-hero-copy">
                         <div className="cam-title"><img src={`${assets}/icon.png`} alt="" width="56" height="56" /><h1>{app.title}</h1></div>
                         <p className="cam-intro">{app.intro}</p>
-                        {hasInstallers && !download && <p className="desktop-app-availability">{availability}</p>}
+                        {!download && <p className="desktop-app-availability">{availability}</p>}
                         <div className="cam-actions">
                             {download && <a className="cam-button cam-button-primary" href={downloadUrl(download.file)}>Download for {download.label} <span aria-hidden="true">↓</span></a>}
-                            {!hasInstallers && <a className="cam-button cam-button-primary" href={`${repository}/releases/latest`} target="_blank" rel="noreferrer">GitHub releases <span aria-hidden="true">↗</span></a>}
                             <a className="cam-button" href={repository} target="_blank" rel="noreferrer">View on GitHub <span aria-hidden="true">↗</span></a>
                         </div>
                         <p className="cam-install-note">
                             {download && <>{download.requirement} · </>}
-                            {!hasInstallers && <>{app.platforms} · </>}
                             {app.releaseNote && <>{app.releaseNote} · </>}
-                            <a href="#installation">{hasInstallers ? 'How to install' : 'Build from source'}</a>
+                            <a href="#installation">How to install</a>
                         </p>
                     </div>
                     <figure className="cam-hero-visual">
@@ -187,7 +193,7 @@ export default function DesktopApp({ moduleId }) {
                     <p className="desktop-app-note">{app.screenshotNote} {app.screenshotRevision && <a href={`${repository}/blob/${app.screenshotRevision}/README.md#screenshots`} target="_blank" rel="noreferrer">Screenshot details ↗</a>}</p>
                 </section>
                 <section id="installation" className="cam-install" aria-labelledby="app-install-title">
-                    <h2 id="app-install-title">{hasInstallers ? 'Installation' : 'Build from source'}</h2>
+                    <h2 id="app-install-title">Installation</h2>
                     <div className="desktop-app-instructions">
                         {app.downloads.map(option => (
                             <section key={option.platform}>
@@ -200,8 +206,7 @@ export default function DesktopApp({ moduleId }) {
                             </section>
                         ))}
                         <p className="desktop-app-note">{app.setup}</p>
-                        {hasInstallers ? <a className="cam-guide" href={`${repository}#install`} target="_blank" rel="noreferrer">Full installation guide ↗</a>
-                            : <a className="cam-guide" href={`${repository}#build-locally`} target="_blank" rel="noreferrer">Source build guide ↗</a>}
+                        <a className="cam-guide" href={`${repository}#install`} target="_blank" rel="noreferrer">Full installation guide ↗</a>
                     </div>
                 </section>
             </div>

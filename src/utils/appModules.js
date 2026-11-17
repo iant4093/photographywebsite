@@ -63,7 +63,6 @@ export const APP_MODULES = Object.freeze([
         title: 'TruongStream',
         detail: 'Use a supported USB camera as a webcam and apply color grades in real time.',
         summary: 'USB camera and webcam studio',
-        status: 'Source available',
     },
     {
         id: 'truongcleaner',
