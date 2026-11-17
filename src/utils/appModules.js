@@ -16,6 +16,13 @@ export const APP_MODULES = Object.freeze([
         comingSoon: true,
     },
     {
+        id: 'truongflix',
+        path: '/apps/truongflix',
+        title: 'TruongFlix',
+        detail: 'Organize and watch your own movies and shows on Mac or Windows.',
+        summary: 'Local media center for Mac and Windows',
+    },
+    {
         id: 'truongcam',
         path: '/apps/truongcam',
         title: 'TruongCam',
@@ -35,20 +42,6 @@ export const APP_MODULES = Object.freeze([
         title: 'TruongScaler',
         detail: 'Upscale photos to 2× locally on your iPhone.',
         summary: '2× photo upscaling for iPhone',
-    },
-    {
-        id: 'truongflix',
-        path: '/apps/truongflix',
-        title: 'TruongFlix',
-        detail: 'Organize and watch your own movies and shows on Mac or Windows.',
-        summary: 'Local media center for Mac and Windows',
-    },
-    {
-        id: 'truongcleaner',
-        path: '/apps/truongcleaner',
-        title: 'TruongCleaner',
-        detail: 'See what takes up space on your Mac and review what you can clean.',
-        summary: 'Storage cleaner for Mac',
     },
     {
         id: 'photo-api',
@@ -71,5 +64,12 @@ export const APP_MODULES = Object.freeze([
         detail: 'Use a supported USB camera as a webcam and apply color grades in real time.',
         summary: 'USB camera and webcam studio',
         status: 'Source available',
+    },
+    {
+        id: 'truongcleaner',
+        path: '/apps/truongcleaner',
+        title: 'TruongCleaner',
+        detail: 'See what takes up space on your Mac and review what you can clean.',
+        summary: 'Storage cleaner for Mac',
     },
 ])
