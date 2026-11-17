@@ -103,11 +103,6 @@
   cursor: pointer;
 }
 
-.linen-site .archive-search-filter-grid .site-select-control:hover {
-  border-color: var(--color-charcoal);
-}
-
-
 .linen-site .archive-search-summary {
   display: flex;
   align-items: baseline;
@@ -196,7 +191,7 @@
   background: rgba(45, 41, 35, 0.78);
 }
 
-.linen-site[data-theme="dark"]:not(.linen-admin) .archive-search-filter-grid .site-select-control {
+.linen-site[data-theme="dark"]:where(:not(.linen-admin)) .archive-search-filter-grid .site-select-control {
   background-color: rgba(45, 41, 35, 0.78);
 }
 
