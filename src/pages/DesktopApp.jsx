@@ -68,6 +68,57 @@ const APPS = {
         screenshotNote: 'Captured in the macOS app.',
         screenshotRevision: 'e1f6f70a0dc022cc62e7e0084589aff0fe7a9240',
     },
+    truongpaper: {
+        title: 'TruongPaper',
+        intro: 'Set your desktop wallpaper from the Ian Truong Photography library, Steam Workshop, or your own files. Mix photos and live wallpapers in playlists and choose what plays on each screen.',
+        platforms: 'Mac and Windows',
+        downloads: [
+            {
+                platform: 'macos', label: 'macOS', file: 'TruongPaper-macOS.dmg', requirement: 'macOS 14.2 or later (Apple silicon)',
+                instructions: 'Open the DMG and drag TruongPaper into Applications. If macOS asks you to approve the first launch, follow the installation guide below.',
+            },
+            {
+                platform: 'windows', label: 'Windows', file: 'TruongPaper-Windows-Setup.exe', requirement: 'Windows 10 version 1809 or later (x64)',
+                instructions: 'Run the setup file and follow the installer. The installation guide covers the SmartScreen prompt if it appears.',
+            },
+        ],
+        setup: <>Browse and cache photos from the <Link to="/apps/photo-api">Photo API</Link> without an account. Workshop downloads can use a guest source when available or Steam with a Wallpaper Engine license.</>,
+        features: [
+            'Queue full-resolution photos for offline rotation, or import your own photos, videos, and wallpapers.',
+            'Browse Steam Workshop and try experimental Wallpaper Engine scene, video, and web playback. Application wallpapers require Windows.',
+            'Set separate wallpapers, playlists, timers, and volume for each monitor.',
+            'Adjust scene properties, audio reactivity, playback speed, and color, then save your settings as presets.',
+            'Pause animation when the desktop is covered, your laptop is on battery, or the screen locks.',
+        ],
+        screenshotSize: [1120, 718],
+        hero: ['native-library', 'Wallpaper library', 'Native wallpaper library with photographs from the Ian Truong Photography API'],
+        screens: [
+            ['photos-api', 'Photo API queue', 'Photo API view with saved albums, cache controls, and history', [1120, 1060]],
+            ['scene-inspector', 'Scene controls', 'Wallpaper Engine scene inspector with effect settings and presets', [1120, 1060]],
+            ['monitors-playlists', 'Display settings', 'Displays view with the wallpaper assigned to each monitor', [1120, 1060]],
+        ],
+        screenshotNote: 'The library shows live Photo API data. The gallery shows the browser preview with sample data.',
+        screenshotRevision: '7284d7c70180893fa17c449b823987a735016d98',
+    },
+    truongstream: {
+        title: 'TruongStream',
+        intro: 'A USB webcam studio for Mac and Windows. Use a supported Canon, Sony, Nikon, or Fujifilm camera for calls or streaming, with exposure and color controls alongside the live preview.',
+        platforms: 'Mac and Windows',
+        downloads: [],
+        setup: 'TruongStream targets Apple silicon Macs on macOS 14.2 or later and 64-bit Windows. The source build guide lists the requirements for building it locally.',
+        features: [
+            'Connect over USB and control shutter speed, aperture, ISO, white balance, and focus as supported by the camera.',
+            'Apply built-in color presets or import your own .cube LUT, with a split preview to compare the grade.',
+            'Use Windows virtual camera output or send video to OBS through Clean Output Mode or the local MJPEG stream. Native macOS virtual camera output requires a signed and notarized camera extension.',
+            'Canon EOS R7 has been tested on hardware. Sony, Nikon, and Fujifilm camera protocols are implemented and listed in the GitHub compatibility table.',
+        ],
+        screenshotSize: [1280, 800],
+        hero: ['studio', 'Camera controls', 'TruongStream browser preview with a simulated Canon EOS R7 and exposure controls'],
+        screens: [
+            ['color', 'Color and LUT controls', 'TruongStream browser preview showing the LUT inspector and intensity control'],
+        ],
+        screenshotNote: 'Captured from the project’s browser preview with a simulated camera feed.',
+    },
 }
 
 function getPlatform({ userAgentData, platform, userAgent, maxTouchPoints }) {
@@ -85,6 +136,7 @@ export default function DesktopApp({ moduleId }) {
     const repository = `https://github.com/iant4093/${app.title}`
     const assets = `/apps/${moduleId}`
     const platform = getPlatform(navigator)
+    const hasInstallers = app.downloads.length > 0
     const download = app.downloads.find(option => option.platform === platform)
     const downloadUrl = file => `${repository}/releases/latest/download/${file}`
     const [heroFile, heroCaption, heroAlt] = app.hero
@@ -100,15 +152,17 @@ export default function DesktopApp({ moduleId }) {
                     <div className="cam-hero-copy">
                         <div className="cam-title"><img src={`${assets}/icon.png`} alt="" width="56" height="56" /><h1>{app.title}</h1></div>
                         <p className="cam-intro">{app.intro}</p>
-                        {!download && <p className="desktop-app-availability">{availability}</p>}
+                        {hasInstallers && !download && <p className="desktop-app-availability">{availability}</p>}
                         <div className="cam-actions">
                             {download && <a className="cam-button cam-button-primary" href={downloadUrl(download.file)}>Download for {download.label} <span aria-hidden="true">↓</span></a>}
+                            {!hasInstallers && <a className="cam-button cam-button-primary" href={`${repository}/releases/latest`} target="_blank" rel="noreferrer">GitHub releases <span aria-hidden="true">↗</span></a>}
                             <a className="cam-button" href={repository} target="_blank" rel="noreferrer">View on GitHub <span aria-hidden="true">↗</span></a>
                         </div>
                         <p className="cam-install-note">
                             {download && <>{download.requirement} · </>}
+                            {!hasInstallers && <>{app.platforms} · </>}
                             {app.releaseNote && <>{app.releaseNote} · </>}
-                            <a href="#installation">How to install</a>
+                            <a href="#installation">{hasInstallers ? 'How to install' : 'Build from source'}</a>
                         </p>
                     </div>
                     <figure className="cam-hero-visual">
@@ -130,10 +184,10 @@ export default function DesktopApp({ moduleId }) {
                             </figure>
                         ))}
                     </div>
-                    <p className="desktop-app-note">{app.screenshotNote} <a href={`${repository}/blob/${app.screenshotRevision}/README.md#screenshots`} target="_blank" rel="noreferrer">Screenshot details ↗</a></p>
+                    <p className="desktop-app-note">{app.screenshotNote} {app.screenshotRevision && <a href={`${repository}/blob/${app.screenshotRevision}/README.md#screenshots`} target="_blank" rel="noreferrer">Screenshot details ↗</a>}</p>
                 </section>
                 <section id="installation" className="cam-install" aria-labelledby="app-install-title">
-                    <h2 id="app-install-title">Installation</h2>
+                    <h2 id="app-install-title">{hasInstallers ? 'Installation' : 'Build from source'}</h2>
                     <div className="desktop-app-instructions">
                         {app.downloads.map(option => (
                             <section key={option.platform}>
@@ -145,8 +199,9 @@ export default function DesktopApp({ moduleId }) {
                                 <p>{option.instructions}</p>
                             </section>
                         ))}
-                        <p>{app.setup}</p>
-                        <a className="cam-guide" href={`${repository}#install`} target="_blank" rel="noreferrer">Full installation guide ↗</a>
+                        <p className="desktop-app-note">{app.setup}</p>
+                        {hasInstallers ? <a className="cam-guide" href={`${repository}#install`} target="_blank" rel="noreferrer">Full installation guide ↗</a>
+                            : <a className="cam-guide" href={`${repository}#build-locally`} target="_blank" rel="noreferrer">Source build guide ↗</a>}
                     </div>
                 </section>
             </div>

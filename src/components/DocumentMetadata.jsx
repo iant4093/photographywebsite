@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useLocation } from 'react-router'
 
 const SITE_ORIGIN = 'https://iantruongphotography.com'
+const SITE_NAME = 'Ian Truong Photography'
 const PAGE_TITLES = {
     '/editor': 'Photo Editor',
     '/apps': 'Apps',
@@ -11,6 +12,8 @@ const PAGE_TITLES = {
     '/apps/truongscaler': 'TruongScaler — 2× Photo Upscaling for iPhone',
     '/apps/truongflix': 'TruongFlix — Local Media Center for Mac and Windows',
     '/apps/truongcleaner': 'TruongCleaner — Storage Cleaner for Mac',
+    '/apps/truongpaper': 'TruongPaper — Live Wallpapers',
+    '/apps/truongstream': 'TruongStream — USB Webcam Studio',
     '/apps/photo-api': 'Photo API',
     '/privacy': 'Privacy Notice',
     '/terms': 'Terms & Photo Use',
@@ -20,17 +23,16 @@ const PAGE_TITLES = {
 }
 
 export default function DocumentMetadata() {
-    const location = useLocation()
+    const { pathname } = useLocation()
 
     useEffect(() => {
         const canonical = document.querySelector('link[rel="canonical"]') || document.createElement('link')
-        canonical.setAttribute('rel', 'canonical')
-        canonical.setAttribute('href', new URL(location.pathname, SITE_ORIGIN).toString())
+        canonical.rel = 'canonical'
+        canonical.href = new URL(pathname, SITE_ORIGIN).href
         if (!canonical.parentNode) document.head.appendChild(canonical)
-        document.title = PAGE_TITLES[location.pathname]
-            ? `${PAGE_TITLES[location.pathname]} | Ian Truong Photography`
-            : 'Ian Truong Photography'
-    }, [location.pathname])
+        const pageTitle = PAGE_TITLES[pathname]
+        document.title = pageTitle ? `${pageTitle} | ${SITE_NAME}` : SITE_NAME
+    }, [pathname])
 
     return null
 }

@@ -125,8 +125,9 @@ function App() {
                         <Route path="/apps/truongcam" element={<TruongCam />} />
                         <Route path="/apps/truongnoiser" element={<PhotoApp moduleId="truongnoiser" />} />
                         <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
-                        <Route path="/apps/truongflix" element={<DesktopApp moduleId="truongflix" />} />
-                        <Route path="/apps/truongcleaner" element={<DesktopApp moduleId="truongcleaner" />} />
+                        {['truongflix', 'truongcleaner', 'truongpaper', 'truongstream'].map(id => (
+                            <Route key={id} path={`/apps/${id}`} element={<DesktopApp moduleId={id} />} />
+                        ))}
                         <Route path="/apps/photo-api" element={<PhotoApi />} />
                         <Route path="/stats" element={<Stats />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />

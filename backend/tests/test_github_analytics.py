@@ -61,7 +61,10 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["reason_code"], "fresh_report")
 
     def test_repository_selection_is_allowlisted_and_scopes_cache_reads(self):
-        self.assertEqual(set(github_analytics.REPOSITORIES), {"photographywebsite", "TruongCam", "TruongNoiser", "TruongScaler", "TruongFlix", "TruongCleaner"})
+        self.assertEqual(set(github_analytics.REPOSITORIES), {
+            "photographywebsite", "TruongCam", "TruongNoiser", "TruongScaler",
+            "TruongFlix", "TruongCleaner", "TruongPaper", "TruongStream",
+        })
         for repository in github_analytics.REPOSITORIES:
             event = {**ADMIN_EVENT, "queryStringParameters": {"repo": repository}}
             with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(

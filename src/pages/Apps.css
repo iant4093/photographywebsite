@@ -27,6 +27,13 @@
   color: var(--color-amber-dark);
 }
 
+.linen-site .app-module-art img {
+  width: min(100%, 5.75rem);
+  height: auto;
+  border-radius: 1.15rem;
+  transition: transform 260ms ease;
+}
+
 .linen-site .app-module-art svg {
   width: 100%;
   max-width: 22rem;
@@ -34,7 +41,7 @@
   transition: transform 260ms ease;
 }
 
-.linen-site .explore-module-card:is(:hover, :focus-visible) .app-module-art svg {
+.linen-site .explore-module-card:is(:hover, :focus-visible) .app-module-art :is(svg, img) {
   transform: scale(1.04);
 }
 
@@ -96,7 +103,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .linen-site .app-module-art svg {
+  .linen-site .app-module-art :is(svg, img) {
     transform: none !important;
     transition: none;
   }

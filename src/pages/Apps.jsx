@@ -50,6 +50,8 @@ function AppArt({ id }) {
                     <rect x="29" y="27" width="182" height="106" rx="2" />
                     <path d="m92 62-23 18 23 18m56-36 23 18-23 18m-17-45-22 54" />
                 </svg>
+            ) : id === 'truongpaper' || id === 'truongstream' ? (
+                <img src={`/apps/${id}/icon.png`} width="112" height="112" alt="" />
             ) : (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <path d="M34 53h42l12-19h64l12 19h42v79H34V53Z" />
@@ -103,7 +105,7 @@ export default function Apps() {
                         <span className="explore-module-number">{String(index + 1).padStart(2, '0')}</span>
                         <AppArt id={module.id} />
                         <div>
-                            <span className="app-status">{module.comingSoon ? 'Coming soon' : 'Available now'}</span>
+                            <span className="app-status">{module.status ?? (module.comingSoon ? 'Coming soon' : 'Available now')}</span>
                             <h2>{module.title}</h2>
                             <p>{module.detail}</p>
                         </div>

@@ -12,6 +12,8 @@ const REPOSITORIES = [
     { name: 'TruongScaler', label: 'TruongScaler' },
     { name: 'TruongFlix', label: 'TruongFlix' },
     { name: 'TruongCleaner', label: 'TruongCleaner' },
+    { name: 'TruongPaper', label: 'TruongPaper' },
+    { name: 'TruongStream', label: 'TruongStream' },
 ]
 const ALL_REPOS = 'all'
 const REPO_OPTIONS = [

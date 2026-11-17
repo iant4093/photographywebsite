@@ -22,6 +22,8 @@ function renderApps(path = '/apps') {
                 <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
                 <Route path="/apps/truongflix" element={<DesktopApp moduleId="truongflix" />} />
                 <Route path="/apps/truongcleaner" element={<DesktopApp moduleId="truongcleaner" />} />
+                <Route path="/apps/truongpaper" element={<DesktopApp moduleId="truongpaper" />} />
+                <Route path="/apps/truongstream" element={<DesktopApp moduleId="truongstream" />} />
                 <Route path="/apps/photo-api" element={<PhotoApi />} />
             </Routes>
         </MemoryRouter>,
@@ -43,7 +45,7 @@ describe('Apps navigation', () => {
         renderApps()
         expect(screen.getByRole('heading', { name: 'Apps' })).toBeInTheDocument()
         const modules = screen.getByRole('region', { name: 'Apps' })
-        expect(within(modules).getAllByRole('link')).toHaveLength(8)
+        expect(within(modules).getAllByRole('link')).toHaveLength(10)
         fireEvent.click(within(modules).getByRole('link', { name: /Web Editor/ }))
         expect(screen.getByRole('heading', { name: 'Existing photo editor' })).toBeInTheDocument()
     })
@@ -134,14 +136,16 @@ describe('Desktop app downloads', () => {
         ['TruongFlix', 'Win32', undefined, 'Windows', 'TruongFlix-Windows-Setup.exe'],
         ['TruongFlix', 'Linux x86_64', { platform: 'Windows', mobile: false }, 'Windows', 'TruongFlix-Windows-Setup.exe'],
         ['TruongCleaner', 'MacIntel', undefined, 'macOS', 'TruongCleaner.dmg'],
-    ])('selects the primary installer for %s on %s', (title, platform, userAgentData, label, file) => {
+        ['TruongPaper', 'MacIntel', undefined, 'macOS', 'TruongPaper-macOS.dmg', 4],
+        ['TruongPaper', 'Win32', undefined, 'Windows', 'TruongPaper-Windows-Setup.exe', 4],
+    ])('selects the primary installer for %s on %s', (title, platform, userAgentData, label, file, screenshotCount = 5) => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform, userAgentData })
         renderApps()
         fireEvent.click(screen.getByRole('link', { name: new RegExp(title) }))
         expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(title)
         expect(screen.getByRole('link', { name: `Download for ${label}` })).toHaveAttribute('href', `https://github.com/iant4093/${title}/releases/latest/download/${file}`)
         expect(screen.getAllByRole('link', { name: /Download for/ })).toHaveLength(1)
-        expect(screen.getAllByRole('img')).toHaveLength(5)
+        expect(screen.getAllByRole('img')).toHaveLength(screenshotCount)
         expect(document.title).toContain(title)
     })
 
@@ -149,6 +153,7 @@ describe('Desktop app downloads', () => {
         ['truongflix', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
         ['truongflix', { platform: 'MacIntel', maxTouchPoints: 5 }, /Visit this page on your Mac or Windows computer/],
         ['truongcleaner', { platform: 'Linux armv8l', userAgent: 'Mozilla/5.0 (Linux; Android 14)' }, /Visit this page on your Mac/],
+        ['truongpaper', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
     ])('shows desktop guidance for %s on mobile (%j)', (moduleId, device, message) => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue(device)
         renderApps(`/apps/${moduleId}`)
@@ -165,5 +170,19 @@ describe('Desktop app downloads', () => {
         expect(screen.getByText(message)).toBeInTheDocument()
         expect(screen.queryByRole('link', { name: /Download for/ })).not.toBeInTheDocument()
         expect(screen.getAllByRole('link', { name: /installer/ }).map(link => link.textContent)).toEqual(installers)
+    })
+
+    it('links TruongStream to the latest GitHub release and the source guide', () => {
+        vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform: 'MacIntel' })
+        renderApps()
+        const card = screen.getByRole('link', { name: /TruongStream/ })
+        expect(card).toHaveTextContent('Source available')
+        fireEvent.click(card)
+        expect(screen.getByRole('heading', { name: 'TruongStream', level: 1 })).toBeInTheDocument()
+        expect(screen.getByText(/Mac and Windows ·/)).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: /Download for|installer/i })).not.toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /GitHub releases/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongStream/releases/latest')
+        expect(screen.getByRole('link', { name: /Source build guide/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongStream#build-locally')
+        expect(screen.getByText(/simulated camera feed/)).toBeInTheDocument()
     })
 })

@@ -57,4 +57,19 @@ export const APP_MODULES = Object.freeze([
         detail: 'Request a random full-resolution photo from the public galleries.',
         summary: 'Public photo API for developers',
     },
+    {
+        id: 'truongpaper',
+        path: '/apps/truongpaper',
+        title: 'TruongPaper',
+        detail: 'Set live wallpapers, Workshop scenes, and photos on Mac or Windows.',
+        summary: 'Live wallpapers for Mac and Windows',
+    },
+    {
+        id: 'truongstream',
+        path: '/apps/truongstream',
+        title: 'TruongStream',
+        detail: 'Use a supported USB camera as a webcam and apply color grades in real time.',
+        summary: 'USB camera and webcam studio',
+        status: 'Source available',
+    },
 ])

@@ -49,8 +49,15 @@ REPOSITORIES = {
     "TruongScaler": {"branch": "main", "label": "TruongScaler", "source": "tree"},
     "TruongFlix": {"branch": "main", "label": "TruongFlix"},
     "TruongCleaner": {"branch": "main", "label": "TruongCleaner"},
+    "TruongPaper": {"branch": "main", "label": "TruongPaper"},
+    "TruongStream": {"branch": "main", "label": "TruongStream"},
 }
-_NATIVE_AREAS = {"TruongFlix": "Desktop App", "TruongCleaner": "macOS App"}
+_NATIVE_AREAS = {
+    "TruongFlix": "Desktop App",
+    "TruongCleaner": "macOS App",
+    "TruongPaper": "Desktop App",
+    "TruongStream": "Desktop App",
+}
 API_BASE = "https://api.github.com"
 ARCHIVE_BASE = "https://codeload.github.com"
 
@@ -278,9 +285,11 @@ def _source_area(path, repository=None):
         return "Tests"
     if normalized.endswith(".swift"):
         return _NATIVE_AREAS.get(repository, "iPhone App")
-    if repository == "TruongFlix" and normalized.startswith("src-tauri/"):
+    if repository in ("TruongFlix", "TruongPaper") and normalized.startswith("src-tauri/"):
         return _NATIVE_AREAS[repository]
-    if normalized.startswith("src/"):
+    if repository == "TruongStream" and normalized.startswith(("app-ui/src-tauri/", "core/", "platform-macos/", "platform-windows/")):
+        return _NATIVE_AREAS[repository]
+    if normalized.startswith("src/") or (repository == "TruongStream" and normalized.startswith("app-ui/src/")):
         return "Frontend"
     if normalized.startswith("ops/") or normalized.startswith(".github/") or normalized in {"backend/template.yaml", "backend/makefile"}:
         return "Infrastructure & Ops"
