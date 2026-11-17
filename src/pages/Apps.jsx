@@ -50,8 +50,20 @@ function AppArt({ id }) {
                     <rect x="29" y="27" width="182" height="106" rx="2" />
                     <path d="m92 62-23 18 23 18m56-36 23 18-23 18m-17-45-22 54" />
                 </svg>
-            ) : id === 'truongpaper' || id === 'truongstream' ? (
-                <img src={`/apps/${id}/icon.png`} width="112" height="112" alt="" />
+            ) : id === 'truongpaper' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <rect x="32" y="22" width="176" height="104" rx="2" />
+                    <path d="M32 110h176M42 110l47-45 27 25 25-23 50 43M112 126l-6 16m22-16 6 16m-44 0h60" />
+                    <circle cx="165" cy="49" r="10" />
+                </svg>
+            ) : id === 'truongstream' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <rect x="33" y="35" width="174" height="82" rx="30" />
+                    <circle cx="120" cy="76" r="29" />
+                    <circle cx="120" cy="76" r="19" />
+                    <circle cx="173" cy="62" r="4" />
+                    <path d="M56 76h12m-12 9h12m45 32v20m14-20v20m-38 0h62" />
+                </svg>
             ) : (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <path d="M34 53h42l12-19h64l12 19h42v79H34V53Z" />
