@@ -109,6 +109,32 @@ describe('lightbox motion lifecycle', () => {
         expect(config.onOpened).toHaveBeenCalledOnce()
     })
 
+    it.each(['top', 'bottom'])('opens and returns to the full photo crop across the %s edge', async edge => {
+        const top = edge === 'top' ? -35 : window.innerHeight - 50
+        const { open, close, trigger } = photo({ bounds: [40, top, 160, 120] })
+        setBounds(trigger.querySelector('img'), [44, top + 4, 152, 112])
+        open()
+        vi.advanceTimersToNextFrame()
+        expect(animate(flight(), 'transform').frames[0].transform)
+            .toBe(`translate(-140px, ${top - 110}px) scale(${160 / 420}, 0.25)`)
+        expect(trigger).not.toHaveAttribute('data-lightbox-motion-source')
+        await vi.advanceTimersByTimeAsync(570)
+        const closed = close()
+        expect(animate(flight(), 'width').frames.at(-1))
+            .toMatchObject({ left: '44px', top: `${top + 4}px`, width: '152px', height: '112px' })
+        expect(trigger).not.toHaveAttribute('data-lightbox-motion-source')
+        await vi.advanceTimersByTimeAsync(440)
+        expect(closed).toHaveBeenCalledOnce()
+    })
+
+    it('uses the viewer fade when a photo thumbnail is entirely outside the viewport', () => {
+        const { open, dialog } = photo({ bounds: [40, window.innerHeight, 160, 120] })
+        open()
+        expect(dialog).not.toHaveAttribute('data-lightbox-awaiting')
+        expect(flight()).toBeNull()
+        expect(animate(dialog, 'opacity').frames).toEqual([{ opacity: 0 }, { opacity: 1 }])
+    })
+
     it('returns to the newly selected thumbnail, with one close callback', async () => {
         const { open, close, frame, config } = photo()
         open()
@@ -223,11 +249,12 @@ describe('lightbox motion lifecycle', () => {
         expect(closed).toHaveBeenCalledOnce()
     })
 
-    it('waits for video metadata and a decoded frame before dissolving the still', async () => {
-        const { open, dialog, config } = fixture('video', `
+    it.each(['fully visible', 'partially visible'])('waits for video metadata and a decoded frame from a %s thumbnail', async visibility => {
+        const bounds = visibility === 'fully visible' ? thumbnail : [40, window.innerHeight - 50, 160, 120]
+        const { open, close, dialog, config } = fixture('video', `
             <div class="linen-lightbox-content" style="box-shadow: 0 0 0 4px white">
                 <div class="site-video-player" style="background: black"><video poster="/still.webp"></video></div>
-            </div>`)
+            </div>`, { bounds })
         const video = setBounds(dialog.querySelector('video'), fitted)
         open()
         await vi.advanceTimersByTimeAsync(20)
@@ -236,7 +263,9 @@ describe('lightbox motion lifecycle', () => {
         video.dataset.videoHeight = 1080
         video.dispatchEvent(new Event('loadedmetadata'))
         await vi.advanceTimersByTimeAsync(460)
-        expect(animate(flight(), 'height').frames.at(-1).height).toBe('236.25px')
+        const frames = animate(flight(), 'height').frames
+        expect(frames[0]).toMatchObject({ top: `${bounds[1]}px`, height: '120px' })
+        expect(frames.at(-1).height).toBe('236.25px')
         expect(config.onOpened).not.toHaveBeenCalled()
         video.dispatchEvent(new Event('loadeddata'))
         await vi.advanceTimersByTimeAsync(1)
@@ -245,6 +274,13 @@ describe('lightbox motion lifecycle', () => {
         await vi.advanceTimersByTimeAsync(380)
         expect(config.onOpened).toHaveBeenCalledOnce()
         expect(flight()).toBeNull()
+
+        video.pause = vi.fn()
+        const closed = close()
+        expect(video.pause).toHaveBeenCalledOnce()
+        expect(animate(flight(), 'height').frames.at(-1)).toMatchObject({ top: `${bounds[1]}px`, height: '120px' })
+        await vi.advanceTimersByTimeAsync(420)
+        expect(closed).toHaveBeenCalledOnce()
     })
 
     it('cancels the video handoff when the route unmounts before playback', async () => {

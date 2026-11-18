@@ -8,10 +8,15 @@ export function prefersReducedLightboxMotion() {
     return window.matchMedia?.(reduceMotion).matches === true
 }
 
-export function lightboxRect(element) {
+export function lightboxRect(element, { allowPartial = false } = {}) {
     if (!element?.isConnected) return null
     const rect = element.getBoundingClientRect()
-    return fitsViewport(rect) ? rect : null
+    if (!allowPartial) return fitsViewport(rect) ? rect : null
+    // Keep the full thumbnail geometry so the viewport crops it naturally
+    // as it moves. Fitting the visible slice would stretch the image.
+    const visible = rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0
+        && rect.left < window.innerWidth && rect.top < window.innerHeight
+    return visible ? rect : null
 }
 
 export function fitsViewport(rect) {
@@ -23,7 +28,7 @@ export function rememberLightboxTrigger(element, kind, key, visual = element) {
     if (!element) return null
     element.focus({ preventScroll: true })
     if (prefersReducedLightboxMotion()) return null
-    const rect = lightboxRect(visual)
+    const rect = lightboxRect(visual, { allowPartial: kind === 'photo' || kind === 'video' })
     if (!rect && kind !== 'photo') return null
     if (element.animate) void preloadLightboxMotion()
     const image = visual.querySelector('img')
@@ -53,7 +58,7 @@ export function findLightboxReturn(origin, key) {
     const element = origin.key == null || origin.key === key ? origin.element
         : [...(scope?.querySelectorAll(mediaSelector) || [])].find(tile => tile.getAttribute('data-lightbox-item') === key)
     const visual = element === origin.element ? origin.visual : element
-    const rect = lightboxRect(visual)
+    const rect = lightboxRect(visual, { allowPartial: origin.kind === 'photo' || origin.kind === 'video' })
     if (!rect) return null
     const scroller = element.closest('.museum-album-scroll')
     if (scroller) {

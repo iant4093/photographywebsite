@@ -523,14 +523,21 @@ async function lightboxStabilityCase(width) {
         assert.equal((await pose()).scroll, before.scroll)
 
         if (width < 500) {
+            const offscreenTile = tiles.nth(5)
+            await offscreenTile.evaluate(async element => {
+                const offset = Math.min(0, element.getBoundingClientRect().top - innerHeight - 24)
+                if (offset) window.scrollBy({ top: offset, behavior: 'instant' })
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            })
+            const offscreenPose = await pose()
             await tile.tap()
             await dialog.locator('.linen-lightbox-photo-frame.is-loaded').waitFor()
             await flight.waitFor({ state: 'detached' })
             await page.keyboard.press('ArrowRight')
             await page.keyboard.press('ArrowRight')
             await dialog.getByText('6 / 6', { exact: true }).waitFor()
-            assert.ok(await tiles.nth(5).evaluate(element => element.getBoundingClientRect().bottom > innerHeight),
-                'The selected thumbnail is below the viewport')
+            assert.ok(await offscreenTile.evaluate(element => element.getBoundingClientRect().top >= innerHeight),
+                'The selected thumbnail is fully below the viewport')
             await dialog.locator('.linen-lightbox-photo-frame.is-loaded:not(.is-outgoing)').waitFor()
             await dialog.locator('.linen-lightbox-photo-frame.is-outgoing').waitFor({ state: 'detached' })
             await page.keyboard.press('Escape')
@@ -541,7 +548,7 @@ async function lightboxStabilityCase(width) {
             assert.equal(fadeDuration, 360, 'An offscreen thumbnail gets the softer dissolve')
             assert.equal(await flight.count(), 0)
             await dialog.waitFor({ state: 'hidden' })
-            assert.equal((await pose()).scroll, before.scroll)
+            assert.equal((await pose()).scroll, offscreenPose.scroll)
         }
 
         await page.goto(origin + '/')

@@ -283,7 +283,7 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
         play(dialog, reverse ? [{ opacity: initial, backgroundColor }, { opacity: 0, backgroundColor }] : [{ opacity: 0 }, { opacity: 1 }])
     } else {
         const thumbnail = photoReturn ? origin.visual?.querySelector('img') : null
-        const thumbnailRect = lightboxRect(thumbnail)
+        const thumbnailRect = lightboxRect(thumbnail, { allowPartial: true })
         const thumbnailStyle = thumbnailRect ? getComputedStyle(thumbnail) : null
         const from = thumbnailRect ?? origin.rect
         const targetStyle = getComputedStyle(target)
