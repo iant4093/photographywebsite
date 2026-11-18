@@ -148,10 +148,10 @@ jobs:
       - name: Install browser for deterministic release journeys
         timeout-minutes: 5
         run: |
-          # The runner's Azure mirror can stall while downloading browser fonts.
+          # Regional runner mirrors can stall while downloading browser dependencies.
           # Use Ubuntu's official archive with the same signed apt packages.
           if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+            sudo sed -E -i 's#https?://(azure|[a-z0-9-]+\.ec2)\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
           fi
           npx playwright install --with-deps chromium
       - name: Exercise built frontend browser recovery and administration
