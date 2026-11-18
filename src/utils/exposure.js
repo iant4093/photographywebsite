@@ -48,6 +48,8 @@ const QUIZ_FIELDS = Object.freeze([
     { id: 'focal', prompt: 'Which focal length made this photograph?', read: image => image?.exif?.focalLength, defaults: ['17mm', '33mm', '56mm', '100mm', '400mm'] },
 ])
 
+export const SETTINGS_PROMPTS = Object.freeze(QUIZ_FIELDS.map(field => field.prompt))
+
 function numberFrom(value) {
     const match = String(value || '').replace(',', '').match(/(?:^|\s)(\d+(?:\.\d+)?)/)
         || String(value || '').replace(',', '').match(/(\d+(?:\.\d+)?)/)

@@ -81,7 +81,7 @@ export default function SectionAlbums() {
         <button type="button" onClick={() => navigateBackOr(navigate, back)} className="linen-gallery-back mb-10 inline-flex items-center gap-2 text-sm text-warm-gray hover:text-amber cursor-pointer">
             <span aria-hidden="true">←</span> All {label.toLowerCase()} albums
         </button>
-        <header className="linen-section-heading mb-10">
+        <header className="linen-section-heading mb-10" data-scroll-title-static="">
             <span>{label} collection</span>
             <h1 className="font-serif text-4xl md:text-6xl text-charcoal [overflow-wrap:anywhere]">{category}</h1>
             <p>{grouped[category].length} {grouped[category].length === 1 ? 'album' : 'albums'}</p>

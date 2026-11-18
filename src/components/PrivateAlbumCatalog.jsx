@@ -5,11 +5,12 @@ import { useId, useMemo } from 'react'
 import AlbumCard from './AlbumCard'
 import ScrollRow from './ScrollRow'
 import SiteSelect from './SiteSelect'
+import SectionStats from './SectionStats'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { HOME_SECTION_SORT_OPTIONS, sortHomePhotoSections } from '../utils/homeSectionSort'
 import { markAsRevealed } from '../utils/scroll'
-import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
+import { prefersReducedLightboxMotion, rememberLightboxTrigger } from '../utils/lightboxOrigin'
 
 // Everything here is derived from the authenticated owner's catalog. Public
 // section stats and discovery endpoints must not be used for private galleries.
@@ -41,7 +42,9 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
             <nav aria-label={`Your ${mediaLabel} sections`} className="flex flex-wrap gap-2">
                 {categories.map(category => <button key={category} type="button"
-                    onClick={() => document.getElementById(`${id}-${category}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    onClick={() => document.getElementById(`${id}-${category}`)?.scrollIntoView({
+                        behavior: prefersReducedLightboxMotion() ? 'instant' : 'smooth', block: 'start',
+                    })}
                     className="rounded-full border border-warm-border px-3 py-1.5 text-sm text-warm-gray hover:text-amber hover:border-amber transition-colors">
                     {category}
                 </button>)}
@@ -69,14 +72,7 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
                                 <path d="M3 7h3c4 0 8 10 12 10h3M17 13l4 4-4 4M3 17h3c1.5 0 3-1.5 4.5-3.5M13.5 10.5C15 8.5 16.5 7 18 7h3M17 3l4 4-4 4" />
                             </svg>
                         </button>}
-                        <details className="relative">
-                            <summary aria-label={`Show ${category} ${mediaLabel} statistics`} className="linen-theme-toggle cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                                <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7v1" /></svg>
-                            </summary>
-                            <p className="absolute left-0 top-full z-10 mt-2 w-48 rounded-xl border border-warm-border bg-cream p-4 text-sm text-warm-gray shadow-warm-sm">
-                                {grouped[category].length} albums · {itemCount} {mediaLabel}
-                            </p>
-                        </details>
+                        <SectionStats category={category} localCounts={{ albumCount: grouped[category].length, mediaCount: itemCount, mediaLabel }} />
                         <div className="hidden sm:block h-px bg-warm-border flex-1" />
                         <SiteSelect aria-label={`Filter ${category} ${mediaLabel} albums by year`} value={year}
                             onChange={value => setCategoryYear(category, value)} options={options}

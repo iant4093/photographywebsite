@@ -14,6 +14,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const [isVisible, setIsVisible] = useState(true)
     const lastScrollY = useRef(0)
     const visibleRef = useRef(true)
+    const navRef = useRef(null)
     const menuToggleRef = useRef(null)
     const menuRef = useRef(null)
     // Hover dropdowns only load where the desktop links are shown to a pointer.
@@ -47,26 +48,45 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     // Smart Navbar scroll logic
     useEffect(() => {
         let frame = null
+        const nav = navRef.current
+        const setVisibility = (nextVisible) => {
+            if (nextVisible === visibleRef.current) return
+            visibleRef.current = nextVisible
+            setIsVisible(nextVisible)
+        }
+        const restoreVisibility = () => {
+            const restored = nav?.dataset.routeCardNavbar
+            if (!restored) return false
+            lastScrollY.current = window.scrollY
+            setVisibility(restored === 'shown')
+            return true
+        }
         const update = () => {
             frame = null
+            if (restoreVisibility()) return
             if (document.documentElement.hasAttribute('data-lightbox-scroll-lock')
                 || document.documentElement.hasAttribute('data-menu-scroll-lock')) return
             const currentScrollY = window.scrollY
+            const restoreTop = document.documentElement.dataset.routeScrollRestoring
+            if (restoreTop !== undefined) {
+                lastScrollY.current = currentScrollY
+                if (Number(restoreTop) < 10) setVisibility(true)
+                return
+            }
             if (currentScrollY === lastScrollY.current) return
             const nextVisible = currentScrollY < 10 || currentScrollY < lastScrollY.current
                 ? true
                 : !(currentScrollY > 50 && currentScrollY > lastScrollY.current)
-            if (nextVisible !== visibleRef.current) {
-                visibleRef.current = nextVisible
-                setIsVisible(nextVisible)
-            }
+            setVisibility(nextVisible)
             lastScrollY.current = currentScrollY
         }
         const handleScroll = () => {
             if (frame === null) frame = window.requestAnimationFrame(update)
         }
+        nav?.addEventListener('route-card-navbar-restore', restoreVisibility)
         window.addEventListener('scroll', handleScroll, { passive: true })
         return () => {
+            nav?.removeEventListener('route-card-navbar-restore', restoreVisibility)
             window.removeEventListener('scroll', handleScroll)
             if (frame !== null) window.cancelAnimationFrame(frame)
         }
@@ -107,14 +127,20 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
             setIsMenuOpen(false)
             menuToggleRef.current?.focus()
         }
+        const closeOnHistory = () => setIsMenuOpen(false)
         window.addEventListener('keydown', closeOnEscape)
-        return () => window.removeEventListener('keydown', closeOnEscape)
+        window.addEventListener('popstate', closeOnHistory)
+        return () => {
+            window.removeEventListener('keydown', closeOnEscape)
+            window.removeEventListener('popstate', closeOnHistory)
+        }
     }, [isMenuOpen])
 
     return (
         <>
             {/* Top Navigation Bar */}
-            <nav className={`linen-nav fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isMenuOpen || isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'menu-is-open bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
+            <nav ref={navRef} data-navbar-visible={isMenuOpen || isVisible ? '' : undefined}
+                className={`linen-nav fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isMenuOpen || isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'menu-is-open bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
                 <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <div className="linen-brand-cluster flex items-center gap-3 z-50 relative">

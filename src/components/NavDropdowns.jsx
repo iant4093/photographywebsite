@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from 'react-router'
+import { useLayoutEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router'
 import useNavSections from '../hooks/useNavSections'
 import { EXPLORE_MODULES } from '../utils/exploreModules'
 import { APP_MODULES } from '../utils/appModules'
@@ -21,8 +21,8 @@ function SectionLinks({ mediaType, sections, failed, pathname }) {
                         const current = pathname === to
                         return (
                             <li key={category}>
-                                <Link to={to} className={current ? 'is-active' : undefined} aria-current={current ? 'page' : undefined}>
-                                    <span>{category}</span>
+                                <Link to={to} data-route-card="section" className={current ? 'is-active' : undefined} aria-current={current ? 'page' : undefined}>
+                                    <span data-route-title="">{category}</span>
                                     <small>{count}</small>
                                 </Link>
                             </li>
@@ -41,20 +41,42 @@ function SectionLinks({ mediaType, sections, failed, pathname }) {
 // Hover dropdowns for the desktop masthead. Loaded on its own only where a
 // hover-capable desktop layout can use it, keeping the entry bundle lean.
 export default function NavDropdowns({ pathname, photoActive, videoActive, exploreActive, appsActive }) {
+    const { key } = useLocation()
     const [dropdown, setDropdown] = useState(null)
     const photoSections = useNavSections('photo')
     const videoSections = useNavSections('video')
-    // Remember where a dropdown was opened so navigating away closes it.
-    const openDropdown = dropdown?.pathname === pathname ? dropdown.id : null
+    // Hide a retiring panel before the destination is painted, even if its
+    // normal pointer-leave fade had already started on the previous page.
+    const changedPage = dropdown && dropdown.key !== key
+    if (changedPage && !dropdown.navigationDismissal) {
+        setDropdown({ ...dropdown, open: false, navigating: false, navigationDismissal: true })
+    }
+    useLayoutEffect(() => {
+        const holdPanelOnNavigation = event => {
+            if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+            const link = event.target.closest?.('.linen-nav a[href]')
+            if (!link || link.origin !== window.location.origin || link.hasAttribute('download') || (link.target && link.target !== '_self')) return
+            // A lazy route can still be painting the old page after the URL
+            // changes. Keep the panel in place until React commits the route.
+            setDropdown(current => current?.key === key && current.open ? { ...current, navigating: true } : current)
+        }
+        document.addEventListener('click', holdPanelOnNavigation, true)
+        return () => document.removeEventListener('click', holdPanelOnNavigation, true)
+    }, [key])
     const dropdownProps = (id) => ({
         id,
-        open: openDropdown === id,
+        open: !changedPage && dropdown?.id === id && dropdown.open,
+        navigating: Boolean(!changedPage && dropdown?.id === id && dropdown.navigating),
+        navigationDismissal: Boolean(changedPage || dropdown?.navigationDismissal),
         onOpen: (next) => {
             if (next === 'photo') photoSections.refresh()
             if (next === 'video') videoSections.refresh()
-            setDropdown({ id: next, pathname })
+            setDropdown(current => current?.key === key && current.navigating ? current
+                : { id: next, key, open: true, navigating: false, navigationDismissal: false })
         },
-        onClose: (closing) => setDropdown(current => (current?.id === closing ? null : current)),
+        onClose: (closing) => setDropdown(current => current?.id === closing && !current.navigating
+            ? { ...current, open: false }
+            : current),
     })
 
     return (

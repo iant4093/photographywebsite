@@ -192,6 +192,9 @@ function AlbumCard({
             <button
                 type="button"
                 data-camera-cursor="photo"
+                data-route-card="album"
+                data-route-target={targetRoute}
+                data-route-inline={album.type === 'video' ? undefined : ''}
                 onClick={onOpen}
                 onMouseEnter={onMouseEnter}
                 onPointerMove={handlePointerTilt}
@@ -207,6 +210,7 @@ function AlbumCard({
     return (
         <Link
             data-camera-cursor="photo"
+            data-route-card="album"
             to={targetRoute}
             onClick={onNavigate}
             onPointerMove={handlePointerTilt}

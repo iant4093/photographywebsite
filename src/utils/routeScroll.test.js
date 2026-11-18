@@ -65,6 +65,64 @@ describe('route scroll restoration', () => {
         expect(window.scrollY).toBe(1900)
     })
 
+    it('keeps the clicked catalog position when the browser changes history before React swaps pages', () => {
+        const original = window.history.state
+        try {
+            window.history.replaceState({ key: 'catalog' }, '', '/')
+            const leave = start({ key: 'catalog', historyKey: 'catalog' })
+            scroll(1600)
+            window.history.replaceState({ key: 'album' }, '', '/album/fixture')
+            scroll(0)
+            leave()
+
+            window.history.replaceState({ key: 'catalog' }, '', '/')
+            start({ key: 'catalog', historyKey: 'catalog', restore: true })
+            frame()
+            expect(window.scrollY).toBe(1600)
+        } finally {
+            window.history.replaceState(original, '', '/')
+        }
+    })
+
+    it('reapplies the saved offset if browser Back scrolls again during restoration', () => {
+        const leave = start({})
+        scroll(1600)
+        leave()
+        scroll(0)
+        start({ restore: true })
+        frame()
+        expect(window.scrollY).toBe(1600)
+        window.dispatchEvent(new Event('touchstart'))
+        scroll(0)
+        frame()
+        expect(window.scrollY).toBe(1600)
+    })
+
+    it('ignores horizontal swipe momentum and restores again after a late browser scroll', () => {
+        const leave = start({})
+        scroll(1600)
+        leave()
+        scroll(0)
+        start({ restore: true, historyTraversal: true })
+        window.dispatchEvent(new WheelEvent('wheel', { deltaX: -120, deltaY: 3 }))
+        window.dispatchEvent(new WheelEvent('wheel'))
+        frame()
+        expect(window.scrollY).toBe(1600)
+
+        vi.advanceTimersByTime(450)
+        window.dispatchEvent(new WheelEvent('wheel', { deltaX: -45, deltaY: 1 }))
+        scroll(0)
+        frame()
+        expect(window.scrollY).toBe(1600)
+        expect(document.documentElement.dataset.routeScrollRestoring).toBe('1600')
+
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: 60 }))
+        scroll(1540)
+        frame()
+        expect(window.scrollY).toBe(1540)
+        expect(document.documentElement.hasAttribute('data-route-scroll-restoring')).toBe(false)
+    })
+
     it('keeps separate visits and queries separate, including saved zero', () => {
         const first = start({ key: 'first', route: '/search?q=birds' })
         scroll(1200)

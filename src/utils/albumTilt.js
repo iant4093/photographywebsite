@@ -24,6 +24,10 @@ function edgeStability(x, y) {
     return smoothFade(edge, 0.8) * smoothFade(corner, 0.72)
 }
 
+function setTiltStyle(card, property, value) {
+    if (card.style.getPropertyValue(property) !== value) card.style.setProperty(property, value)
+}
+
 function paint(card, clientX, clientY) {
     const bounds = card.getBoundingClientRect()
     const width = card.offsetWidth || bounds.width
@@ -31,29 +35,29 @@ function paint(card, clientX, clientY) {
     const x = Math.max(-1, Math.min(1, (clientX - bounds.left - bounds.width / 2) / width * 2))
     const y = Math.max(-1, Math.min(1, (clientY - bounds.top - bounds.height / 2) / height * 2))
     const stability = edgeStability(x, y)
-    card.style.setProperty('--glow', `${((x + 1) * 50).toFixed(1)}% ${((y + 1) * 50).toFixed(1)}%`)
-    card.style.setProperty('--album-tilt-x', `${(-softenCenter(y) * 2.1 * stability).toFixed(2)}deg`)
-    card.style.setProperty('--album-tilt-y', `${(softenCenter(x) * 2.64 * stability).toFixed(2)}deg`)
+    setTiltStyle(card, '--glow', `${((x + 1) * 50).toFixed(1)}% ${((y + 1) * 50).toFixed(1)}%`)
+    setTiltStyle(card, '--album-tilt-x', `${(-softenCenter(y) * 2.1 * stability).toFixed(2)}deg`)
+    setTiltStyle(card, '--album-tilt-y', `${(softenCenter(x) * 2.64 * stability).toFixed(2)}deg`)
 }
 
-function followMovingCard() {
+function renderTilt() {
     frame = undefined
     if (!trackedCard) return
-    if (!trackedCard.matches(':hover')) {
+    const moving = trackedCard.classList.contains('floating-print-card')
+    if (moving && !trackedCard.matches(':hover')) {
         reset(trackedCard)
         return
     }
     paint(trackedCard, pointerX, pointerY)
-    frame = requestAnimationFrame(followMovingCard)
+    if (moving) frame = requestAnimationFrame(renderTilt)
+    else trackedCard = undefined
 }
 
 export function update(card, clientX, clientY) {
-    paint(card, clientX, clientY)
-    if (!card.classList.contains('floating-print-card')) return
     trackedCard = card
     pointerX = clientX
     pointerY = clientY
-    frame ||= requestAnimationFrame(followMovingCard)
+    frame ??= requestAnimationFrame(renderTilt)
 }
 
 export function reset(card) {

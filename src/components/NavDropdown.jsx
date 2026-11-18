@@ -6,7 +6,7 @@ const CLOSE_DELAY_MS = 160
 // A desktop navigation link that reveals a panel of related pages on hover.
 // Keyboard users open it with ArrowDown and move through it with the arrow
 // keys; Escape returns focus to the link. Touch taps navigate as usual.
-export default function NavDropdown({ id, label, to, active, open, onOpen, onClose, children }) {
+export default function NavDropdown({ id, label, to, active, open, navigating, navigationDismissal, onOpen, onClose, children }) {
     const wrapperRef = useRef(null)
     const triggerRef = useRef(null)
     const panelRef = useRef(null)
@@ -73,9 +73,8 @@ export default function NavDropdown({ id, label, to, active, open, onOpen, onClo
                 to={to}
                 className={active ? 'is-active' : undefined}
                 aria-current={active ? 'page' : undefined}
-                aria-expanded={open}
+                aria-expanded={open && !navigating}
                 aria-controls={panelId}
-                onClick={close}
             >
                 {label}
             </Link>
@@ -83,9 +82,9 @@ export default function NavDropdown({ id, label, to, active, open, onOpen, onClo
                 ref={panelRef}
                 id={panelId}
                 className="linen-nav-dropdown-panel"
-                aria-hidden={!open}
-                inert={open ? undefined : true}
-                onClick={event => { if (event.target.closest('a')) close() }}
+                aria-hidden={!open || navigating}
+                inert={!open || navigating ? true : undefined}
+                data-navigation-dismissal={navigationDismissal ? '' : undefined}
             >
                 <div className="linen-nav-dropdown-inner">{children}</div>
             </div>

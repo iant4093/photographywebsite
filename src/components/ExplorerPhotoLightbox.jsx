@@ -5,6 +5,7 @@ import PhotoLightboxNavigation from './PhotoLightboxNavigation'
 import PhotoZoomFrame from './PhotoZoomFrame'
 import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
+import usePhotoPreview from '../hooks/usePhotoPreview'
 import { loadExplorerViewer, readExplorerViewer } from '../utils/explorerViewer'
 import { mediaBeforeDisplayUrl, mediaBeforeSrcSet, mediaDisplayUrl, mediaId, mediaPreviewSrcSet } from '../utils/mediaUrls'
 import { photoDescription } from '../utils/mediaAccessibility'
@@ -21,7 +22,6 @@ const ACTION_CLASS = 'inline-flex items-center gap-2 rounded-full border border-
 export default function ExplorerPhotoLightbox(props) {
     const [state, setState] = useState(() => ({ Viewer: readExplorerViewer(), error: false, attempt: 0 }))
     const [Viewer, setViewer] = useState(() => readExplorerViewer())
-    const [preview, setPreview] = useState({ id: null, ready: null, outgoing: null })
     const [printing, setPrinting] = useState(false)
     const [comparison, setComparison] = useState({ id: null, requested: false, ready: null })
     const closeControl = useRef(null)
@@ -32,8 +32,8 @@ export default function ExplorerPhotoLightbox(props) {
     const image = props.images[props.index]
     const imageId = image ? (mediaId(image) || props.index) : null
     const refreshRef = useRef({ image, callback: props.onBeforeRefresh })
-    const readyImage = preview.ready?.id
-    if (preview.id !== imageId) setPreview({ id: imageId, ready: null, outgoing: preview.ready })
+    const { ready, outgoing, fading, setPreview } = usePhotoPreview(imageId)
+    const readyImage = ready?.id
     const beforeUrl = mediaBeforeDisplayUrl(image)
     const beforeSet = mediaBeforeSrcSet(image)
     const beforeKey = JSON.stringify([imageId, beforeUrl, beforeSet])
@@ -50,13 +50,6 @@ export default function ExplorerPhotoLightbox(props) {
     const lookUpOriginal = event => {
         if (!comparisonRequested && image.before.status === 'unresolved') void Promise.resolve(props.onBeforeRefresh?.(event, image)).catch(() => {})
     }
-
-    useEffect(() => {
-        if (!preview.outgoing) return undefined
-        const outgoing = preview.outgoing
-        const timer = window.setTimeout(() => setPreview(current => current.outgoing === outgoing ? { ...current, outgoing: null } : current), 360)
-        return () => window.clearTimeout(timer)
-    }, [preview.outgoing])
 
     useEffect(() => {
         if (Viewer || readyImage !== imageId || props.images.length < 2 || !bounds.width || !bounds.height) return undefined
@@ -86,7 +79,7 @@ export default function ExplorerPhotoLightbox(props) {
         if (!dialog) return undefined
         let timer
         const promote = () => {
-            if (dialog.hasAttribute('inert') || printing || pointerDown.current || preview.outgoing
+            if (dialog.hasAttribute('inert') || printing || pointerDown.current || outgoing
                 || dialog.querySelector('.is-zoomed, .is-panning')
                 || dialog.querySelector('.linen-lightbox-share')?.textContent.includes('Link Copied')) return
             if (Date.now() - lastInput.current < 200) { schedule(); return }
@@ -111,7 +104,7 @@ export default function ExplorerPhotoLightbox(props) {
             dialog.removeEventListener('pointerup', schedule)
             dialog.removeEventListener('keyup', schedule)
         }
-    }, [state.Viewer, Viewer, printing, preview.outgoing, image])
+    }, [state.Viewer, Viewer, printing, outgoing, image])
 
     // Keep the existing bounded original-status cadence if an active zoom or
     // print checkout deliberately postpones the non-disruptive enhancement.
@@ -184,9 +177,9 @@ export default function ExplorerPhotoLightbox(props) {
                 <div className="linen-lightbox-media-stage flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {image ? (
                         <div ref={containerRef} className="linen-lightbox-media absolute inset-0" style={{ gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)' }}>
-                        {preview.outgoing && <PhotoZoomFrame key={`outgoing-${imageId}`} bounds={bounds} outgoing visible={!showingBefore}
-                            src={mediaDisplayUrl(preview.outgoing.image)} srcSet={mediaPreviewSrcSet(preview.outgoing.image) || undefined}
-                            sizes={sizesFor(preview.outgoing.image)} width={preview.outgoing.image.width} height={preview.outgoing.image.height}
+                        {outgoing && <PhotoZoomFrame key={`outgoing-${outgoing.id}`} bounds={bounds} outgoing fading={fading} visible={!showingBefore}
+                            src={mediaDisplayUrl(outgoing.image)} srcSet={mediaPreviewSrcSet(outgoing.image) || undefined}
+                            sizes={sizesFor(outgoing.image)} width={outgoing.image.width} height={outgoing.image.height}
                             alt="" aria-hidden="true" decoding="async" className="linen-lightbox-photo linen-lightbox-photo-outgoing object-contain relative z-20"
                             style={PHOTO_STYLE} />}
                         <PhotoZoomFrame key={imageId} bounds={bounds} loaded={readyImage === imageId} visible={!showingBefore}
@@ -195,6 +188,7 @@ export default function ExplorerPhotoLightbox(props) {
                             alt={photoDescription(image, props.ariaLabel, props.index, props.images.length)}
                             className={`linen-lightbox-photo linen-lightbox-edited object-contain relative z-30 ${readyImage === imageId ? 'is-loaded' : ''}`}
                             style={PHOTO_STYLE}
+                            onError={props.onMediaError}
                             onLoad={event => {
                                 const element = event.currentTarget
                                 afterImageDecode(element, () => {

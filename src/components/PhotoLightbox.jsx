@@ -10,6 +10,7 @@ import {
 } from '../utils/mediaUrls'
 import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
+import usePhotoPreview from '../hooks/usePhotoPreview'
 import PhotoZoomFrame from './PhotoZoomFrame'
 import PhotoLightboxNavigation from './PhotoLightboxNavigation'
 import { photoDescription } from '../utils/mediaAccessibility'
@@ -17,7 +18,6 @@ import { markImageReady } from '../utils/imageReadiness'
 import { prefetchPhoto } from '../utils/photoPrefetch'
 import { afterImageDecode } from '../utils/viewerImageReadiness'
 
-const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
 const ORIGINAL_REFRESH_SLOW_INTERVAL_MS = 60_000
 const ORIGINAL_REFRESH_LIFETIME_MS = 15 * 60_000
@@ -99,20 +99,11 @@ function PhotoLightbox({
     // An explorer's small loading dialog may already have displayed this exact
     // photo. Preserve it through the code-loading handoff instead of fading
     // back to an empty stage while the same cached image reports its load.
-    const [preview, setPreview] = useState(() => ({
-        id: activeId,
-        ready: initialImageReady && activeImage ? {
-            id: activeId,
-            image: activeImage,
-            rawUrl: mediaDisplayUrl(activeImage),
-            previewSrcSet: mediaPreviewSrcSet(activeImage),
-        } : null,
-        outgoing: null,
-    }))
-    const loadedImageId = preview.ready?.id
-    const outgoingImage = preview.outgoing
     const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
+    const { ready, outgoing: outgoingImage, fading, setPreview } = usePhotoPreview(activeId,
+        initialImageReady && activeImage ? { id: activeId, image: activeImage, rawUrl: activeRawUrl, previewSrcSet } : null)
+    const loadedImageId = ready?.id
     const [comparison, setComparison] = useState(() => ({
         ...freshComparison(activeId),
         requested: initialComparisonRequested,
@@ -134,25 +125,8 @@ function PhotoLightbox({
     const beforeLoadFailed = comparison.failedKey === beforeRequestKey
     const hasBeforeRefresh = Boolean(onBeforeRefresh)
 
-    // Only carry the immediately preceding decoded photo into a navigation fade.
-    // Advancing again must never resurrect an older outgoing layer, even when
-    // the skipped photo has not loaded or its fade has not finished.
-    if (preview.id !== activeId) {
-        setPreview({ id: activeId, ready: null, outgoing: preview.ready })
-    }
-
     // Returning to a previous photograph also starts with its edit.
     if (comparison.id !== activeId) setComparison(freshComparison(activeId))
-
-    useEffect(() => {
-        if (!outgoingImage) return
-        // The fade starts on navigation, not on the next photo's load event.
-        // Slow or failed loads cannot leave a stale photograph on screen.
-        const timer = window.setTimeout(() => {
-            setPreview(current => current.outgoing === outgoingImage ? { ...current, outgoing: null } : current)
-        }, PHOTO_CROSSFADE_MS)
-        return () => window.clearTimeout(timer)
-    }, [outgoingImage])
 
     useEffect(() => {
         if (loadedImageId !== activeId || images.length < 2 || !bounds.width || !bounds.height) return undefined
@@ -403,9 +377,10 @@ function PhotoLightbox({
                         >
                             {outgoingImage && (
                                 <PhotoZoomFrame
-                                    key={`outgoing-${activeId}`}
+                                    key={`outgoing-${outgoingImage.id}`}
                                     bounds={bounds}
                                     outgoing
+                                    fading={fading}
                                     visible={!showingBefore}
                                     src={outgoingImage.rawUrl}
                                     srcSet={outgoingImage.previewSrcSet || undefined}

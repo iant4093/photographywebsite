@@ -458,6 +458,12 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+:is(.museum-entry-panel, .museum-loading) button:is(:hover, :focus-visible) {
+  background: #d5ad89;
+  border-color: #d5ad89;
 }
 
 .museum-entry-panel > div {

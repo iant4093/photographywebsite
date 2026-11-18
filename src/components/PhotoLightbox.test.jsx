@@ -221,14 +221,38 @@ describe('PhotoLightbox', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
-  it('retires the previous photo on schedule even while the next photo is still loading', () => {
+  it('holds the previous photo until the next photo decodes, then starts the fade', () => {
     vi.useFakeTimers()
     const props = { images: [landscape, portrait], ariaLabel: 'Viewer', onClose: vi.fn() }
     const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
     try {
       fireEvent.load(screen.getByAltText(/^Photograph \d/))
       rerender(<PhotoLightbox {...props} index={1} />)
-      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(500))
+      const outgoing = document.querySelector('.linen-lightbox-photo-frame.is-outgoing')
+      expect(outgoing).toBeInTheDocument()
+      expect(outgoing).not.toHaveClass('is-fading')
+      fireEvent.load(screen.getByAltText(/^Photograph \d/))
+      expect(outgoing).toHaveClass('is-fading')
+      act(() => vi.advanceTimersByTime(200))
+      expect(outgoing).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(200))
+      expect(outgoing).not.toBeInTheDocument()
+    } finally {
+      unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('retires the previous photo if the next photo takes too long to load', () => {
+    vi.useFakeTimers()
+    const props = { images: [landscape, portrait], ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+    try {
+      fireEvent.load(screen.getByAltText(/^Photograph \d/))
+      rerender(<PhotoLightbox {...props} index={1} />)
+      act(() => vi.advanceTimersByTime(700))
+      expect(document.querySelector('.linen-lightbox-photo-frame.is-outgoing')).toHaveClass('is-fading')
       act(() => vi.advanceTimersByTime(400))
       expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
       expect(document.querySelector('.linen-lightbox-placeholder')).toBeNull()
@@ -263,7 +287,7 @@ describe('PhotoLightbox', () => {
       expect(screen.getByRole('dialog')).not.toHaveClass('linen-photo-rapid', 'linen-photo-cached')
       act(() => vi.advanceTimersByTime(180))
       expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeInTheDocument()
-      act(() => vi.advanceTimersByTime(200))
+      act(() => vi.advanceTimersByTime(240))
       expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
     } finally {
       unmount()
@@ -298,7 +322,7 @@ describe('PhotoLightbox', () => {
     }
   })
 
-  it('drops an interrupted outgoing frame and ignores late decodes when wrapping to a fresh instance', async () => {
+  it('keeps the displayed frame when skipping an unloaded photo and ignores its late decode', async () => {
     const photos = [landscape, portrait, { ...landscape, id: 'third' }]
     const props = { images: photos, ariaLabel: 'Viewer', onClose: vi.fn() }
     const { rerender } = render(<PhotoLightbox {...props} index={0} />)
@@ -308,14 +332,16 @@ describe('PhotoLightbox', () => {
     let finishDecode
     slowPhoto.decode = () => new Promise(resolve => { finishDecode = resolve })
     fireEvent.load(slowPhoto)
+    const outgoing = document.querySelector('.linen-lightbox-photo-outgoing')
+    expect(outgoing).toHaveAttribute('src', landscape.url)
     rerender(<PhotoLightbox {...props} index={2} />)
-    expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+    expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBe(outgoing)
     rerender(<PhotoLightbox {...props} index={1} />)
     const returnedPhoto = screen.getByAltText(/^Photograph \d/)
     expect(returnedPhoto).not.toBe(slowPhoto)
     await act(async () => { finishDecode() })
     expect(returnedPhoto).not.toHaveClass('is-loaded')
-    expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+    expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBe(outgoing)
     fireEvent.load(returnedPhoto)
     expect(returnedPhoto).toHaveClass('is-loaded')
   })

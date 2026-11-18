@@ -52,6 +52,7 @@
     border: 1px solid var(--color-warm-border);
     color: inherit;
     cursor: pointer;
+    transition: background-color 180ms ease;
 }
 
 .section-stats-close:hover { background: var(--color-warm-border); }
@@ -59,11 +60,16 @@
 .section-stats-close:focus-visible,
 .section-stats-message button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 
+.section-stats-body {
+    --stats-body-height: 11.5rem;
+    min-block-size: var(--stats-body-height);
+    margin-top: 1.5rem;
+}
+
 .section-stats-list {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
     gap: .875rem 1.5rem;
-    margin-top: 1.5rem;
     font-size: 1rem;
     line-height: 1.6;
 }
@@ -73,8 +79,40 @@
 .section-stats-list ul { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
 .section-stats-message { margin-top: 1.5rem; font-size: 1rem; }
 .section-stats-message button { margin-top: .5rem; text-decoration: underline; cursor: pointer; }
+.section-stats-loading { color: var(--color-warm-gray); }
+
+@media (prefers-reduced-motion: no-preference) {
+    .section-stats-results {
+        display: grid;
+        animation: section-stats-expand 460ms cubic-bezier(.25,.6,.3,1) both;
+    }
+
+    .section-stats-results > dl { min-block-size: 0; overflow: clip; }
+
+    .section-stats-list > * {
+        animation: section-stats-reveal 420ms cubic-bezier(.25,.6,.3,1) both;
+        animation-delay: calc(70ms + var(--stats-row, 0) * 36ms);
+    }
+    .section-stats-list > :nth-child(n+3) { --stats-row: 1; }
+    .section-stats-list > :nth-child(n+5) { --stats-row: 2; }
+    .section-stats-list > :nth-child(n+7) { --stats-row: 3; }
+    .section-stats-list > :nth-child(n+9) { --stats-row: 4; }
+    .section-stats-loading { animation: section-stats-reveal 320ms ease both; animation-delay: 300ms; }
+    .section-stats-message[role="alert"] { animation: section-stats-reveal 420ms ease both; }
+
+    @keyframes section-stats-expand {
+        from { grid-template-rows: minmax(var(--stats-body-height), 0fr); }
+        to { grid-template-rows: minmax(var(--stats-body-height), 1fr); }
+    }
+
+    @keyframes section-stats-reveal {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+}
 
 @media (max-width: 380px) {
+    .section-stats-body { --stats-body-height: 22rem; }
     .section-stats-list { grid-template-columns: minmax(0, 1fr); gap: .25rem; }
     .section-stats-list dd { margin-bottom: .75rem; }
 }

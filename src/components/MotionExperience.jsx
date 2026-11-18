@@ -220,7 +220,8 @@ export default function MotionExperience() {
         const collectTargets = () => {
             collectFrame = null
             const nextTargets = Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
-                .filter((element) => !element.closest('[role="dialog"]') && !element.classList.contains('fixed'))
+                .filter((element) => !element.closest('[role="dialog"]')
+                    && !element.matches('.fixed, [data-scroll-title-static]'))
             const nextSet = new Set(nextTargets)
 
             targets.forEach((target) => {

@@ -102,6 +102,7 @@ describe('desktop navigation dropdowns', () => {
 
     fireEvent.click(night)
     expect(photos).toHaveAttribute('aria-expanded', 'false')
+    expect(panel).toHaveAttribute('data-navigation-dismissal')
   })
 
   it('reuses a fresh catalog snapshot and picks up new sections once it changes', async () => {
@@ -187,6 +188,7 @@ describe('desktop navigation dropdowns', () => {
     fireEvent.keyDown(explore, { key: 'Escape' })
     expect(explore).toHaveAttribute('aria-expanded', 'false')
     expect(explore).toHaveFocus()
+    expect(panelFor(explore)).not.toHaveAttribute('data-navigation-dismissal')
   })
 
   it.each(['/editor', '/apps/truongroom', '/apps/truongcam', '/apps/truongnoiser', '/apps/truongscaler', '/apps/truongflix', '/apps/truongcleaner', '/apps/truongpaper', '/apps/truongstream'])('opens Apps on %s with the app links', async path => {

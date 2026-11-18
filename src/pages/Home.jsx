@@ -308,10 +308,10 @@ function Home() {
                                 <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:gap-4">
                                     <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
                                     <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">
-                                        <Link to={`/sections/photo/${encodeURIComponent(category)}`}
+                                        <Link to={`/sections/photo/${encodeURIComponent(category)}`} data-route-card="section"
                                             className="inline-flex min-h-11 items-center gap-2 hover:text-amber transition-colors"
                                             aria-label={`View all ${category} photo albums`}>
-                                            {category}
+                                            <span data-route-title="">{category}</span>
                                             <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                                 <path d="M5 12h14m-6-6 6 6-6 6" />
                                             </svg>

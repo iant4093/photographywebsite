@@ -1,6 +1,6 @@
 import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import useNavigationState from '../hooks/useNavigationState'
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
@@ -20,7 +20,7 @@ import {
     readExploreBrowseState,
     writeExploreBrowseState,
 } from '../utils/exploreState'
-import { buildSettingsDeck, buildSettingsRoundForImage, EXPOSURE_GROUPS } from '../utils/exposure'
+import { buildSettingsDeck, buildSettingsRoundForImage, EXPOSURE_GROUPS, SETTINGS_PROMPTS } from '../utils/exposure'
 import { trackPhotoDownload } from '../utils/analytics'
 import {
     mediaFileName,
@@ -36,7 +36,9 @@ import { shareUrlForAlbumPhoto } from '../utils/share'
 import { saveVerticalScroll } from '../utils/scroll'
 import { EXPLORE_MODULES } from '../utils/exploreModules'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
+import useMediaQuery from '../hooks/useMediaQuery'
 import { handlePointerTilt } from '../utils/pointerTilt'
+import { createImageSnapshot } from '../utils/imageSnapshot'
 
 const PAGE_SIZE = 24
 const ImmersiveGallery = lazy(() => import('./ImmersiveGallery'))
@@ -95,7 +97,8 @@ function exposureSelection(value) {
 function ExploreHeader({ title = 'Explore', detail = 'Choose a different way into the photography archive.' }) {
     return (
         <header className="explore-header max-w-7xl mx-auto px-6 pt-14 pb-8 md:pt-20 md:pb-12">
-            <div className="linen-section-heading editorial-motion-frame">
+            <div className={`linen-section-heading${title === 'Explore' ? ' editorial-motion-frame' : ''}`}
+                data-scroll-title-static={title === 'Explore' ? undefined : ''}>
                 <span>Visual index</span>
                 <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">{title}</h1>
                 <p>{detail}</p>
@@ -148,6 +151,7 @@ function ExploreLanding() {
                 {EXPLORE_MODULES.map((module, index) => (
                     <Link
                         key={module.id}
+                        data-route-card={module.id === 'immersive' ? undefined : 'explore'}
                         to={module.path}
                         className={`explore-module-card linen-media-frame linen-photo-frame${module.id === 'immersive' ? ' explore-module-card--immersive' : ''} editorial-motion-media`}
                         onClick={() => saveVerticalScroll('/explore')}
@@ -236,23 +240,135 @@ function ExploreCard({ item, index, mode, onOpen }) {
     )
 }
 
-function ExploreGrid({ items, mode, onOpen, updating }) {
-    if (!items.length) return null
+function ExploreResultLayer({ items, mode, onOpen, phase, inactive, layerRef }) {
     return (
-        <div className={`explore-results-stage${updating ? ' is-updating' : ''}`} aria-busy={updating}>
-            {updating && <span className="explore-results-updating" role="status">Updating photographs…</span>}
-            <div className="explore-grid" data-lightbox-grid inert={updating ? true : undefined}>
-                {items.map((item, index) => (
-                    <ExploreCard
-                        key={`${item.albumId}:${mediaId(item)}`}
-                        item={item}
-                        index={index}
-                        mode={mode}
-                        onOpen={onOpen}
-                    />
-                ))}
-            </div>
+        <div ref={layerRef} className={`explore-grid explore-grid--${phase}`} data-lightbox-grid={phase === 'current' ? '' : undefined}
+            inert={inactive} aria-hidden={inactive || undefined}>
+            {items.map((item, index) => (
+                <ExploreCard key={`${item.albumId}:${mediaId(item)}`} item={item} index={index} mode={mode} onOpen={onOpen} />
+            ))}
         </div>
+    )
+}
+
+function waitForExploreThumbnails(layer, commit) {
+    const cards = [...layer.children]
+    const viewportBottom = Math.min(window.innerHeight, layer.getBoundingClientRect().bottom)
+    const visible = cards.filter(card => {
+        const { top, bottom } = card.getBoundingClientRect()
+        return top < viewportBottom && bottom > 0
+    })
+    // Prime the leading row when the filters fill the entire viewport.
+    const needed = visible.length ? visible : cards.slice(0, 4)
+    let settled = false
+    let decoding = false
+    const finish = () => {
+        if (settled) return
+        cancel()
+        for (const image of layer.querySelectorAll('.progressive-image-ready')) image.dataset.explorePrepared = ''
+        commit()
+    }
+    const check = () => {
+        if (decoding) return
+        const images = needed.map(card => card.querySelector('.progressive-image-ready'))
+        if (images.some(image => !image)) return
+        decoding = true
+        Promise.allSettled(images.map(image => image.naturalWidth && image.decode?.())).then(finish)
+    }
+    const observer = new MutationObserver(check)
+    const timer = setTimeout(finish, 1100)
+    function cancel() {
+        settled = true
+        observer.disconnect()
+        clearTimeout(timer)
+    }
+    observer.observe(layer, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
+    check()
+    return cancel
+}
+
+function captureExplorePhotos(current, staged) {
+    if (!current || staged.getBoundingClientRect().top >= window.innerHeight) return []
+    const oldFrames = current.querySelectorAll('.explore-photo-image')
+    return [...staged.querySelectorAll('.explore-photo-image')].flatMap((frame, index) => {
+        const oldFrame = oldFrames[index]
+        const oldImage = oldFrame?.querySelector('img.progressive-image-ready')
+        const newImage = frame.querySelector('img.progressive-image-ready')
+        if (!oldImage?.naturalWidth || !newImage?.naturalWidth || oldImage.currentSrc === newImage.currentSrc) return []
+        const bounds = frame.getBoundingClientRect()
+        if (!bounds.width || bounds.top >= window.innerHeight || bounds.bottom <= 0) return []
+        const oldBounds = oldFrame.getBoundingClientRect()
+        if (['top', 'left', 'width', 'height'].some(edge => Math.abs(oldBounds[edge] - bounds[edge]) > 2)) return []
+        const snapshot = createImageSnapshot(oldImage, Math.min(768, Math.ceil(bounds.width * window.devicePixelRatio)))
+        return snapshot ? [{ frame, snapshot }] : []
+    })
+}
+
+function ExploreResults({ items, revision, label, total, mode, onOpen, updating, reshuffling, onShuffle,
+    nextCursor, loadingMore, onLoadMore, children }) {
+    const reduced = useMediaQuery('(prefers-reduced-motion: reduce)')
+    const currentRef = useRef(null)
+    const stagedRef = useRef(null)
+    const [shown, setShown] = useState({ items, revision, label, total, nextCursor })
+    const replacement = shown.revision !== revision
+    const canBlend = replacement && shown.items.length > 0 && items.length > 0 && !reduced && Boolean(globalThis.Element?.prototype.animate)
+    const staging = canBlend && !updating
+    if ((!updating || !shown.items.length) && !canBlend && (replacement || shown.items !== items || shown.label !== label
+        || shown.total !== total || shown.nextCursor !== nextCursor)) {
+        setShown({ items, revision, label, total, nextCursor, photos: replacement ? undefined : shown.photos })
+    }
+
+    useLayoutEffect(() => {
+        if (!staging || !stagedRef.current) return undefined
+        const staged = stagedRef.current
+        return waitForExploreThumbnails(staged, () => {
+            const photos = captureExplorePhotos(currentRef.current, staged)
+            setShown({ items, revision, label, total, nextCursor, photos })
+        })
+    }, [items, label, nextCursor, revision, staging, total])
+
+    useLayoutEffect(() => {
+        if (!shown.photos?.length) return undefined
+        const cleanups = shown.photos.map(({ frame, snapshot }) => {
+            const remove = () => {
+                snapshot.remove()
+                snapshot.width = snapshot.height = 0
+            }
+            if (reduced || !frame.isConnected || !snapshot.width) { remove(); return remove }
+            snapshot.className = 'explore-photo-dissolve'
+            snapshot.setAttribute('aria-hidden', 'true')
+            frame.append(snapshot)
+            const animation = snapshot.animate([{ opacity: 1 }, { opacity: 0 }],
+                { duration: 230, easing: 'ease-out', fill: 'both' })
+            animation.finished.then(remove, remove)
+            return () => { animation.cancel(); remove() }
+        })
+        return () => cleanups.forEach(cleanup => cleanup())
+    }, [reduced, shown.photos])
+
+    const busy = updating || replacement
+    return (
+        <>
+            {shown.label && <div className="explore-results-heading" aria-live="polite">
+                <div className="explore-result-label">
+                    <p><strong>{shown.total}</strong> {shown.total === 1 ? 'photograph' : 'photographs'}</p>
+                    <span title={shown.label}>{shown.label}</span>
+                </div>
+                <ExploreShuffleButton label={`${shown.label.replace(' · ', ' ')} photographs`} loading={reshuffling}
+                    disabled={busy || loadingMore} onClick={onShuffle} />
+            </div>}
+            <span className="sr-only" role="status">{busy ? 'Updating photographs…' : ''}</span>
+            {children}
+            {shown.items.length > 0 && <div className="explore-results-stage" aria-busy={busy}>
+                <ExploreResultLayer key={shown.revision} items={shown.items} mode={mode} onOpen={onOpen} layerRef={currentRef}
+                    phase="current" inactive={busy} />
+                {staging && <ExploreResultLayer key={revision} items={items} mode={mode} onOpen={onOpen}
+                    layerRef={stagedRef} phase="staged" inactive />}
+            </div>}
+            {shown.nextCursor && <button type="button" className="explore-load-more" onClick={onLoadMore} disabled={busy || loadingMore}>
+                {loadingMore ? 'Loading…' : 'Show more'}
+            </button>}
+        </>
     )
 }
 
@@ -334,7 +450,7 @@ function ExploreModule({ mode }) {
 
     const chooseFacet = nextValue => setSearchParams(isColor ? { color: nextValue } : { lens: nextValue })
     const loadMore = useCallback(async () => {
-        if (!nextCursor || loadingMore || !value) return
+        if (!nextCursor || loadingMore || reshuffling || !value) return
         setLoadingMore(true)
         try {
             const page = await fetchExplorePhotos({ mode, value, limit: PAGE_SIZE, cursor: nextCursor })
@@ -355,11 +471,12 @@ function ExploreModule({ mode }) {
         } finally {
             setLoadingMore(false)
         }
-    }, [loadingMore, mode, nextCursor, requestKey, value, setPageState])
+    }, [loadingMore, mode, nextCursor, requestKey, reshuffling, value, setPageState])
 
     const reshuffle = useCallback(async () => {
-        if (!value || loading || reshuffling) return
+        if (!value || loading || loadingMore || reshuffling) return
         const targetKey = requestKey
+        const seed = createExploreSeed()
         setReshuffling(true)
         setLightboxIndex(null)
         try {
@@ -367,10 +484,10 @@ function ExploreModule({ mode }) {
                 mode,
                 value,
                 limit: PAGE_SIZE,
-                seed: createExploreSeed(),
+                seed,
             })
             if (currentRequestKeyRef.current !== targetKey) return
-            setPageState({ key: targetKey, items: page.items, nextCursor: page.nextCursor, error: '' })
+            setPageState({ key: targetKey, seed, items: page.items, nextCursor: page.nextCursor, error: '' })
         } catch (error) {
             if (currentRequestKeyRef.current === targetKey) {
                 setPageState(current => ({
@@ -381,7 +498,7 @@ function ExploreModule({ mode }) {
         } finally {
             setReshuffling(false)
         }
-    }, [loading, mode, requestKey, reshuffling, value, setPageState])
+    }, [loading, loadingMore, mode, requestKey, reshuffling, value, setPageState])
 
     const handleDownload = useCallback(async (event, image) => {
         event.stopPropagation()
@@ -400,8 +517,9 @@ function ExploreModule({ mode }) {
 
     const handlePrint = useCallback(async (event, image) => {
         event.stopPropagation()
+        const returnFocusTo = event.currentTarget
         try {
-            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)))
+            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)), returnFocusTo)
         } catch (error) {
             console.error('Explore print order failed:', error)
             alert(error?.message || 'The print store could not be opened. Please try again.')
@@ -428,7 +546,7 @@ function ExploreModule({ mode }) {
                         <span>{isColor ? '01' : '02'}</span>
                         <h2 id="explore-filter-title">Choose a {isColor ? 'color' : 'lens'}</h2>
                     </div>
-                    {facetLoading && <p className="explore-facet-status" role="status" aria-busy="true">Reading the visual index…</p>}
+                    {facetLoading && <p className="sr-only" role="status">Reading the visual index…</p>}
                     {facetError && <p className="explore-error explore-facet-error" role="alert">{facetError}</p>}
                     {!facetLoading && !facetError && isColor && (
                         <div className="explore-color-options">
@@ -465,29 +583,18 @@ function ExploreModule({ mode }) {
                     )}
                 </section>
 
-                {activeFacet && (
-                    <div className="explore-results-heading" aria-live="polite">
-                        <div>
-                            <p><strong>{activeFacet.photos}</strong> {activeFacet.photos === 1 ? 'photograph' : 'photographs'}</p>
-                            <span>{activeLabel}</span>
-                        </div>
-                        <ExploreShuffleButton label={`${activeLabel} photographs`} loading={reshuffling} disabled={loading} onClick={reshuffle} />
-                    </div>
-                )}
-                {loading && displayItems.length === 0 && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
-                {resultError && <p className="explore-error" role="alert">{resultError}</p>}
-                {!facetLoading && !facetError && !loading && !resultError && !activeFacet && (
-                    <div className="explore-empty"><h2>No indexed photographs</h2><p>Try another Explore module.</p></div>
-                )}
-                {!loading && !resultError && activeFacet && items.length === 0 && (
-                    <div className="explore-empty"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
-                )}
-                <ExploreGrid items={displayItems} mode={mode} onOpen={setLightboxIndex} updating={loading} />
-                {nextCursor && (
-                    <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore ? 'Loading…' : 'Show more'}
-                    </button>
-                )}
+                <ExploreResults revision={JSON.stringify([pageState.key, pageState.seed])} items={displayItems}
+                    mode={mode} onOpen={setLightboxIndex} updating={loading || reshuffling} label={activeFacet && activeLabel}
+                    total={activeFacet?.photos} nextCursor={nextCursor} loadingMore={loadingMore} onLoadMore={loadMore}
+                    reshuffling={reshuffling} onShuffle={reshuffle}>
+                    {resultError && <p className="explore-error" role="alert">{resultError}</p>}
+                    {!facetLoading && !facetError && !loading && !resultError && !activeFacet && (
+                        <div className="explore-empty explore-results-note"><h2>No indexed photographs</h2><p>Try another Explore module.</p></div>
+                    )}
+                    {!loading && !resultError && activeFacet && items.length === 0 && (
+                        <div className="explore-empty explore-results-note"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
+                    )}
+                </ExploreResults>
             </section>
 
             {lightboxIndex !== null && items[lightboxIndex] && (
@@ -794,7 +901,7 @@ function TemporalExplorer({ mode }) {
                         <span>{mode === 'time' ? '05' : '06'}</span>
                         <h2 id="explore-temporal-filter-title">Choose a {config.prompt}</h2>
                     </div>
-                    {facetState.loading && <p className="explore-facet-status" role="status" aria-busy="true">Reading capture metadata…</p>}
+                    {facetState.loading && <p className="sr-only" role="status">Reading capture metadata…</p>}
                     {facetState.error && <p className="explore-error explore-facet-error" role="alert">{facetState.error}</p>}
                     {!facetState.loading && !facetState.error && (
                         <div className={`explore-temporal-options explore-temporal-options--${mode}`}>
@@ -816,34 +923,18 @@ function TemporalExplorer({ mode }) {
                     )}
                 </section>
 
-                {activeFacet && (
-                    <div className="explore-results-heading" aria-live="polite">
-                        <div>
-                            <p><strong>{activeFacet.photos}</strong> {activeFacet.photos === 1 ? 'photograph' : 'photographs'}</p>
-                            <span>{activeFacet.label}</span>
-                        </div>
-                        <ExploreShuffleButton
-                            label={`${activeFacet.label} photographs`}
-                            loading={reshuffling}
-                            disabled={loadingMore || loading}
-                            onClick={reshuffle}
-                        />
-                    </div>
-                )}
-                {loading && displayItems.length === 0 && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
-                {resultError && <p className="explore-error" role="alert">{resultError}</p>}
-                {!facetState.loading && !facetState.error && !activeFacet && (
-                    <div className="explore-empty"><h2>No dated photographs yet</h2><p>Photos without trustworthy capture dates are intentionally omitted.</p></div>
-                )}
-                {!loading && activeFacet && items.length === 0 && !resultError && (
-                    <div className="explore-empty"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
-                )}
-                <ExploreGrid items={displayItems} mode={mode} onOpen={openLightbox} updating={loading} />
-                {nextCursor && (
-                    <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore || reshuffling}>
-                        {loadingMore ? 'Loading…' : 'Show more'}
-                    </button>
-                )}
+                <ExploreResults revision={JSON.stringify([pageState.key, pageState.seed])} items={displayItems}
+                    mode={mode} onOpen={openLightbox} updating={loading || reshuffling} label={activeFacet?.label}
+                    total={activeFacet?.photos} nextCursor={nextCursor} loadingMore={loadingMore} onLoadMore={loadMore}
+                    reshuffling={reshuffling} onShuffle={reshuffle}>
+                    {resultError && <p className="explore-error" role="alert">{resultError}</p>}
+                    {!facetState.loading && !facetState.error && !activeFacet && (
+                        <div className="explore-empty explore-results-note"><h2>No dated photographs yet</h2><p>Photos without trustworthy capture dates are intentionally omitted.</p></div>
+                    )}
+                    {!loading && activeFacet && items.length === 0 && !resultError && (
+                        <div className="explore-empty explore-results-note"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
+                    )}
+                </ExploreResults>
             </section>
             <ExploreSampleLightbox
                 images={items}
@@ -890,8 +981,9 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
 
     const handlePrint = useCallback(async (event, image) => {
         event.stopPropagation()
+        const returnFocusTo = event.currentTarget
         try {
-            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)))
+            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)), returnFocusTo)
         } catch (error) {
             console.error('Explore print order failed:', error)
             alert(error?.message || 'The print store could not be opened. Please try again.')
@@ -1003,7 +1095,7 @@ function ExposureExplorer() {
     }
 
     const loadMore = useCallback(async () => {
-        if (!nextCursor || loadingMore) return
+        if (!nextCursor || loadingMore || reshuffling) return
         setLoadingMore(true)
         try {
             const page = await fetchExplorePhotos({ mode: 'exposure', value, limit: PAGE_SIZE, cursor: nextCursor })
@@ -1025,11 +1117,12 @@ function ExposureExplorer() {
         } finally {
             setLoadingMore(false)
         }
-    }, [loadingMore, nextCursor, value, setPageState])
+    }, [loadingMore, nextCursor, reshuffling, value, setPageState])
 
     const reshuffle = useCallback(async () => {
-        if (reshuffling) return
+        if (loading || loadingMore || reshuffling) return
         const targetValue = value
+        const seed = createExploreSeed()
         setReshuffling(true)
         setLightboxIndex(null)
         try {
@@ -1037,11 +1130,12 @@ function ExposureExplorer() {
                 mode: 'exposure',
                 value,
                 limit: PAGE_SIZE,
-                seed: createExploreSeed(),
+                seed,
             })
             if (currentValueRef.current !== targetValue) return
             setPageState({
                 key: targetValue,
+                seed,
                 items: page.items,
                 total: page.total ?? page.items.length,
                 nextCursor: page.nextCursor,
@@ -1057,7 +1151,7 @@ function ExposureExplorer() {
         } finally {
             setReshuffling(false)
         }
-    }, [reshuffling, value, setPageState])
+    }, [loading, loadingMore, reshuffling, value, setPageState])
 
     return (
         <div className="explore-page animate-fade-in pt-[74px]">
@@ -1083,7 +1177,7 @@ function ExposureExplorer() {
                             </button>
                         ))}
                     </div>
-                    <div className="explore-exposure-options">
+                    <div key={group.id} className="explore-exposure-options">
                         {group.options.map(option => {
                             const count = indexedGroup?.options.find(row => row.id === option.id)?.photos || 0
                             return (
@@ -1097,38 +1191,25 @@ function ExposureExplorer() {
                                 >
                                     <strong>{option.label}</strong>
                                     <span>{option.detail}</span>
-                                    {!loading && <small>{count}</small>}
+                                    {!facetState.loading && <small>{count}</small>}
                                 </button>
                             )
                         })}
                     </div>
                 </section>
 
-                {loading && displayImages.length === 0 && <div className="explore-loading" role="status" aria-busy="true">Reading exposure settings…</div>}
-                {facetState.error && <p className="explore-error" role="alert">{facetState.error}</p>}
-                {resultError && <p className="explore-error" role="alert">{resultError}</p>}
-                {!loading && !facetState.error && !resultError && (
-                    <div className="explore-results-heading" aria-live="polite">
-                        <div>
-                            <p><strong>{total}</strong> {total === 1 ? 'photograph' : 'photographs'}</p>
-                            <span>{group.label} · {group.options.find(option => option.id === optionId)?.label}</span>
-                        </div>
-                        <ExploreShuffleButton
-                            label={`${group.label} ${group.options.find(option => option.id === optionId)?.label || ''} photographs`}
-                            loading={reshuffling}
-                            onClick={reshuffle}
-                        />
-                    </div>
-                )}
-                {!loading && !facetState.error && !resultError && images.length === 0 && (
-                    <div className="explore-empty"><h2>No photographs found</h2><p>Choose another setting to keep exploring.</p></div>
-                )}
-                <ExploreGrid items={displayImages} mode="exposure" onOpen={setLightboxIndex} updating={loading} />
-                {nextCursor && (
-                    <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore ? 'Loading…' : 'Show more'}
-                    </button>
-                )}
+                <ExploreResults revision={JSON.stringify([pageState.key, pageState.seed])} items={displayImages}
+                    mode="exposure" onOpen={setLightboxIndex} updating={loading || reshuffling}
+                    label={!facetState.error && !resultError && (!loading || displayImages.length > 0)
+                        ? `${group.label} · ${group.options.find(option => option.id === optionId)?.label}` : ''}
+                    total={total} nextCursor={nextCursor} loadingMore={loadingMore} onLoadMore={loadMore}
+                    reshuffling={reshuffling} onShuffle={reshuffle}>
+                    {facetState.error && <p className="explore-error" role="alert">{facetState.error}</p>}
+                    {resultError && <p className="explore-error" role="alert">{resultError}</p>}
+                    {!loading && !facetState.error && !resultError && images.length === 0 && (
+                        <div className="explore-empty explore-results-note"><h2>No photographs found</h2><p>Choose another setting to keep exploring.</p></div>
+                    )}
+                </ExploreResults>
             </section>
             <ExploreSampleLightbox
                 images={images}
@@ -1165,6 +1246,7 @@ function createSettingsGame(images) {
     return {
         remaining,
         round: buildSettingsRoundForImage(images, image),
+        sequence: 0,
     }
 }
 
@@ -1172,10 +1254,16 @@ function SettingsGameBoard({ images }) {
     const [game, setGame] = useState(() => createSettingsGame(images))
     const [selected, setSelected] = useState('')
     const [score, setScore] = useState({ correct: 0, answered: 0 })
+    const [advancing, setAdvancing] = useState(false)
+    const roundRef = useRef(null)
+    const departureRef = useRef(null)
+    const reduced = useMediaQuery('(prefers-reduced-motion: reduce)')
     const activeRound = game.round
 
+    useLayoutEffect(() => () => departureRef.current?.cancel(), [])
+
     const chooseAnswer = value => {
-        if (!activeRound || selected) return
+        if (!activeRound || selected || departureRef.current) return
         setSelected(value)
         setScore(current => ({
             correct: current.correct + (value === activeRound.answer ? 1 : 0),
@@ -1183,7 +1271,8 @@ function SettingsGameBoard({ images }) {
         }))
     }
 
-    const nextRound = () => {
+    const advanceRound = () => {
+        departureRef.current = null
         setGame(current => {
             let deck = current.remaining.length ? current.remaining : buildSettingsDeck(images)
             const currentId = mediaId(current.round?.image)
@@ -1198,9 +1287,26 @@ function SettingsGameBoard({ images }) {
             return {
                 remaining,
                 round: buildSettingsRoundForImage(images, image),
+                sequence: current.sequence + 1,
             }
         })
         setSelected('')
+        setAdvancing(false)
+    }
+
+    const nextRound = () => {
+        if (departureRef.current) return
+        const round = roundRef.current
+        if (reduced || !round?.animate) {
+            advanceRound()
+            return
+        }
+        const style = getComputedStyle(round)
+        const departure = round.animate([{ opacity: style.opacity, translate: style.translate }, { opacity: 0, translate: '0 -4px' }],
+            { duration: 145, easing: 'ease-in', fill: 'forwards' })
+        departureRef.current = departure
+        setAdvancing(true)
+        departure.finished.then(advanceRound, () => {})
     }
 
     if (!activeRound) {
@@ -1220,7 +1326,6 @@ function SettingsGameBoard({ images }) {
                     alt={`A photograph from ${activeRound.image.albumTitle}`}
                     eager
                     className="explore-game-image"
-                    style={{ aspectRatio: `${activeRound.image.width || 4} / ${activeRound.image.height || 3}` }}
                 />
                 <span>{activeRound.image.albumTitle}</span>
             </div>
@@ -1229,37 +1334,38 @@ function SettingsGameBoard({ images }) {
                     <span>04 · Round {score.answered + (selected ? 0 : 1)}</span>
                     <strong>{score.correct} / {score.answered} correct</strong>
                 </div>
-                <h2>{activeRound.prompt}</h2>
-                <div className="explore-game-options">
-                    {activeRound.options.map(option => {
-                        const answered = Boolean(selected)
-                        const className = answered
-                            ? option === activeRound.answer ? 'is-correct' : option === selected ? 'is-wrong' : ''
-                            : ''
-                        return (
-                            <button
-                                type="button"
-                                key={option}
-                                className={className}
-                                disabled={answered}
-                                onClick={() => chooseAnswer(option)}
-                            >
-                                {option}
-                            </button>
-                        )
-                    })}
+                <div key={game.sequence} ref={roundRef} className="explore-game-round" data-round={game.sequence} aria-busy={advancing || undefined}>
+                    <div className="explore-game-prompt">
+                        {SETTINGS_PROMPTS.map(prompt => <span key={prompt} aria-hidden="true">{prompt}</span>)}
+                        <h2>{activeRound.prompt}</h2>
+                    </div>
+                    <div className="explore-game-options">
+                        {activeRound.options.map(option => {
+                            const answered = Boolean(selected)
+                            const className = answered
+                                ? option === activeRound.answer ? 'is-correct' : option === selected ? 'is-wrong' : ''
+                                : ''
+                            return (
+                                <button type="button" key={option} className={className} disabled={answered || advancing}
+                                    title={option} onClick={() => chooseAnswer(option)}>
+                                    {option}
+                                </button>
+                            )
+                        })}
+                    </div>
                 </div>
-                {selected ? (
-                    <div className="explore-game-answer" role="status">
+                <div className="explore-game-feedback" data-answered={selected ? '' : undefined}>
+                    <div className="explore-game-answer" role="status" aria-hidden={!selected}>
                         <strong>{selected === activeRound.answer ? 'Correct.' : `The answer was ${activeRound.answer}.`}</strong>
                         <p>
                             {activeRound.image.exif.focalLength} · {activeRound.image.exif.focalRatio} · {activeRound.image.exif.shutterSpeed} · {activeRound.image.exif.iso}
                         </p>
-                        <button type="button" onClick={nextRound}>Next photograph →</button>
                     </div>
-                ) : (
-                    <button type="button" className="explore-game-skip" onClick={nextRound}>Skip photograph</button>
-                )}
+                    {!selected && <button type="button" className="explore-game-skip" aria-disabled={advancing || undefined} onClick={nextRound}>Skip photograph</button>}
+                    <div className="explore-game-actions">
+                        {selected && <button type="button" className="explore-game-next" aria-disabled={advancing || undefined} onClick={nextRound}>Next photograph →</button>}
+                    </div>
+                </div>
             </div>
         </div>
     )
@@ -1269,8 +1375,8 @@ export default function Explore() {
     const location = useLocation()
     const { pathname } = location
     if (pathname === '/explore/immersive-gallery') return <ImmersiveGallery />
-    if (pathname === '/explore/colors') return <ExploreModule mode="color" />
-    if (pathname === '/explore/lenses') return <ExploreModule mode="lens" />
+    if (pathname === '/explore/colors') return <ExploreModule key="color" mode="color" />
+    if (pathname === '/explore/lenses') return <ExploreModule key="lens" mode="lens" />
     if (pathname === '/explore/exposure') return <ExposureExplorer />
     if (pathname === '/explore/time-of-day') return <TemporalExplorer key="time" mode="time" />
     if (pathname === '/explore/seasons') return <TemporalExplorer key="season" mode="season" />

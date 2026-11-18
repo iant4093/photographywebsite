@@ -20,8 +20,13 @@ export default function RouteScrollRestoration() {
             ? readDashboardScroll()
             : restorePath ? getSavedScroll(restorePath) : undefined
         const samePage = prior?.pathname === location.pathname && !location.hash
+        const isBrowserEntry = (window.history.state?.key || 'default') === location.key
+            && window.location.pathname + window.location.search + window.location.hash === route + location.hash
+        if (isBrowserEntry) window.history.scrollRestoration = 'manual'
         const stop = watchScrollPosition({
             key: `${location.key}:${route}${location.hash}`,
+            historyKey: isBrowserEntry ? location.key : undefined,
+            historyTraversal: isBrowserEntry && navigationType === 'POP',
             route,
             restore: navigationType === 'POP' || returning,
             restoreRoute: returning,

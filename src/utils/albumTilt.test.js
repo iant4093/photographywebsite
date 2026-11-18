@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { reset, update } from './albumTilt'
 
 function card() {
@@ -8,19 +8,26 @@ function card() {
 }
 
 describe('album media pointer tilt', () => {
+    const frame = () => vi.advanceTimersToNextFrame()
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
     it('keeps the center still and tilts toward the edges', () => {
         const element = card()
 
         update(element, 110, 170)
+        frame()
         expect(element.style.getPropertyValue('--glow')).toBe('50.0% 50.0%')
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
 
         update(element, 190, 170)
+        frame()
         const innerTilt = Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))
         expect(innerTilt).toBeGreaterThan(2)
 
         update(element, 210, 170)
+        frame()
         expect(element.style.getPropertyValue('--glow')).toBe('100.0% 50.0%')
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
@@ -31,9 +38,11 @@ describe('album media pointer tilt', () => {
         const element = card()
 
         update(element, 200, 170)
+        frame()
         const edgeTilt = Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))
 
         update(element, 200, 305)
+        frame()
         const cornerTilt = Math.hypot(
             Number.parseFloat(element.style.getPropertyValue('--album-tilt-x')),
             Number.parseFloat(element.style.getPropertyValue('--album-tilt-y')),
@@ -42,6 +51,7 @@ describe('album media pointer tilt', () => {
         expect(cornerTilt).toBeLessThan(edgeTilt)
 
         update(element, 210, 320)
+        frame()
         expect(element.style.getPropertyValue('--album-tilt-x')).toBe('0.00deg')
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
     })
@@ -54,21 +64,17 @@ describe('album media pointer tilt', () => {
         element.getBoundingClientRect = () => bounds
 
         update(element, 190, 170)
+        frame()
         const firstTilt = element.style.getPropertyValue('--album-tilt-y')
         bounds = { left: 5, top: 15, width: 210, height: 310 }
         update(element, 190, 170)
+        frame()
 
         expect(element.style.getPropertyValue('--album-tilt-y')).toBe(firstTilt)
     })
 
     it('recalculates while a scrolling card moves under a still pointer', () => {
         let left = 10
-        let nextFrame
-        vi.stubGlobal('requestAnimationFrame', vi.fn(callback => {
-            nextFrame = callback
-            return 1
-        }))
-        vi.stubGlobal('cancelAnimationFrame', vi.fn())
         const element = card()
         element.classList.add('floating-print-card')
         element.matches = vi.fn(() => true)
@@ -76,22 +82,34 @@ describe('album media pointer tilt', () => {
 
         try {
             update(element, 190, 170)
+            frame()
             expect(Number.parseFloat(element.style.getPropertyValue('--album-tilt-y'))).toBeGreaterThan(2)
 
             left = 90
-            nextFrame()
+            frame()
 
             expect(element.style.getPropertyValue('--glow')).toBe('50.0% 50.0%')
             expect(element.style.getPropertyValue('--album-tilt-y')).toBe('0.00deg')
         } finally {
             reset(element)
-            vi.unstubAllGlobals()
         }
+    })
+
+    it('uses the latest pointer position and measures only once per frame', () => {
+        const element = card()
+        update(element, 110, 170)
+        update(element, 160, 170)
+        update(element, 200, 170)
+        expect(element.getBoundingClientRect).not.toHaveBeenCalled()
+        frame()
+        expect(element.getBoundingClientRect).toHaveBeenCalledOnce()
+        expect(element.style.getPropertyValue('--glow')).toBe('95.0% 50.0%')
     })
 
     it('clears both tilt axes when the pointer leaves', () => {
         const element = card()
         update(element, 210, 20)
+        frame()
 
         reset(element)
 

@@ -183,6 +183,14 @@
   -webkit-backdrop-filter: blur(16px);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   cursor: default;
+  transition: opacity 240ms ease, translate 240ms ease;
+  transition: opacity 240ms ease, translate 240ms ease, display 240ms allow-discrete;
+}
+
+.tv-panel[hidden] { display: none; opacity: 0; translate: 0 -5px; pointer-events: none; }
+
+@starting-style {
+  .tv-panel:not([hidden]) { opacity: 0; translate: 0 -5px; }
 }
 .tv-setting { display: grid; gap: 0.45rem; }
 .tv-setting-label { color: var(--tv-muted); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }

@@ -107,6 +107,7 @@ export default function Apps() {
                 {APP_MODULES.map((module, index) => (
                     <Link
                         key={module.id}
+                        data-route-card="app"
                         to={module.path}
                         className="explore-module-card linen-media-frame linen-photo-frame editorial-motion-media"
                         onClick={() => saveVerticalScroll('/apps')}

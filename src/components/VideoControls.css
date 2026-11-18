@@ -16,8 +16,17 @@
   font-family: var(--font-sans);
 }
 .site-video-control-row { display: flex; align-items: center; gap: .5rem; }
-.site-video-controls button:not(.site-select-trigger) { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; flex: 0 0 2.4rem; border-radius: .3rem; cursor: pointer; }
-.site-video-controls button:not(.site-select-trigger):hover { background: var(--color-cream-dark); color: var(--color-amber-dark); }
+.site-video-controls button:not(.site-select-trigger) {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: 0 0 2.4rem;
+  border-radius: .3rem;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+.site-video-controls button:not(.site-select-trigger):is(:hover, :focus-visible) { background: var(--color-cream-dark); color: var(--color-amber-dark); }
 .site-video-controls button:focus-visible { outline: 2px solid var(--color-amber-dark); outline-offset: 2px; }
 .site-video-controls button svg { width: 1.1rem; height: 1.1rem; fill: currentColor; }
 .site-video-controls .site-select-chevron { fill: none; }

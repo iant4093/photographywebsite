@@ -9,13 +9,14 @@ function dateLabel(value) {
     })
 }
 
-export default function StatsDialog({ category, motionOrigin, onClose }) {
+export default function StatsDialog({ category, label, localCounts, motionOrigin, onClose }) {
     const [stats, setStats] = useState(null)
     const [error, setError] = useState(false)
     const [attempt, setAttempt] = useState(0)
     const [opened, setOpened] = useState(false)
 
     useEffect(() => {
+        if (localCounts) return undefined
         const controller = new AbortController()
         let loading = false
         async function refresh() {
@@ -45,14 +46,14 @@ export default function StatsDialog({ category, motionOrigin, onClose }) {
             window.removeEventListener('focus', refresh)
             document.removeEventListener('visibilitychange', refresh)
         }
-    }, [category, attempt])
+    }, [category, attempt, localCounts])
 
     const dateRange = stats?.firstDate
         ? `${dateLabel(stats.firstDate)}${stats.firstDate === stats.lastDate ? '' : ` – ${dateLabel(stats.lastDate)}`}`
         : 'Not recorded'
 
     return (
-        <AccessibleLightbox ariaLabel={`${category} statistics`} onClose={onClose}
+        <AccessibleLightbox ariaLabel={label} onClose={onClose}
             motion={{ kind: 'panel', origin: motionOrigin, onOpened: () => setOpened(true) }} className="section-stats-lightbox">
             <section data-lightbox-panel className="linen-site section-stats-panel" data-theme={document.documentElement.dataset.theme}>
                 <div data-lightbox-copy>
@@ -69,16 +70,22 @@ export default function StatsDialog({ category, motionOrigin, onClose }) {
                         <p>{stats ? 'Stats could not be refreshed. Showing the last loaded counts.' : 'Stats could not be loaded.'}</p>
                         <button type="button" onClick={() => setAttempt(value => value + 1)}>Try again</button>
                     </div>}
-                    {(!opened || (!stats && !error)) && <p role="status" className="section-stats-message">Loading statistics…</p>}
-                    {opened && stats && <dl className="section-stats-list">
-                        <dt>Date range</dt><dd>{dateRange}</dd>
-                        <dt>Albums</dt><dd>{stats.albumCount.toLocaleString()}</dd>
-                        <dt>Photos</dt><dd>{stats.photoCount.toLocaleString()}</dd>
-                        <dt>{stats.cameras.length > 1 ? 'Cameras used' : 'Camera used'}</dt>
-                        <dd>{stats.cameras.join(' · ') || 'Not recorded'}</dd>
-                        <dt>Lenses used</dt>
-                        <dd>{stats.lenses.length ? <ul>{stats.lenses.map(([name, count]) => <li key={name}>{name} ({count})</li>)}</ul> : 'Not recorded'}</dd>
-                    </dl>}
+                    {(!opened || stats || !error) && <div className="section-stats-body">
+                        {opened && (localCounts || stats) ? <div className="section-stats-results">
+                            {localCounts ? <dl className="section-stats-list">
+                                <dt>Albums</dt><dd>{localCounts.albumCount.toLocaleString()}</dd>
+                                <dt className="capitalize">{localCounts.mediaLabel}</dt><dd>{localCounts.mediaCount.toLocaleString()}</dd>
+                            </dl> : <dl className="section-stats-list">
+                                <dt>Date range</dt><dd>{dateRange}</dd>
+                                <dt>Albums</dt><dd>{stats.albumCount.toLocaleString()}</dd>
+                                <dt>Photos</dt><dd>{stats.photoCount.toLocaleString()}</dd>
+                                <dt>{stats.cameras.length > 1 ? 'Cameras used' : 'Camera used'}</dt>
+                                <dd>{stats.cameras.join(' · ') || 'Not recorded'}</dd>
+                                <dt>Lenses used</dt>
+                                <dd>{stats.lenses.length ? <ul>{stats.lenses.map(([name, count]) => <li key={name}>{name} ({count})</li>)}</ul> : 'Not recorded'}</dd>
+                            </dl>}
+                        </div> : <p role="status" className="section-stats-loading">Loading statistics…</p>}
+                    </div>}
                 </div>
             </section>
         </AccessibleLightbox>

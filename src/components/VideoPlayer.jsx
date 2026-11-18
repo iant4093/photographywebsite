@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { parseHlsVariants, qualityLabel, qualityOptions } from '../utils/hlsSource'
 import { mediaDisplayUrl, mediaHlsUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
 import VideoControls from './VideoControls'
+import './DisclosureMotion.css'
 
 function CaptionTrack({ text, language, onError }) {
     const trackRef = useRef(null)
@@ -173,6 +174,8 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
                 playsInline
                 preload="metadata"
                 poster={posterUrl}
+                data-video-width={videoInfo?.width}
+                data-video-height={videoInfo?.height}
                 className="w-full h-full outline-none"
             >
                 {captionVtt && <CaptionTrack key={captionVtt} text={captionVtt} language={videoInfo.captionLanguage || 'en'}
@@ -182,7 +185,7 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
                 quality={useHls && quality?.source === hlsUrl ? quality : null}
                 frames={useHls ? videoInfo?.scrubFrames : null} />}
             {captionError?.text === captionVtt && <p role="status" className="site-video-notice">{captionError.message}</p>}
-            {controls && videoInfo?.transcript && <details className="site-video-transcript">
+            {controls && videoInfo?.transcript && <details className="site-video-transcript linen-disclosure">
                 <summary>Transcript & visual description</summary>
                 <p>{videoInfo.transcript}</p>
             </details>}

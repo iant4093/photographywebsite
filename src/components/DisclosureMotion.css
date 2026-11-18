@@ -1,0 +1,22 @@
+.linen-disclosure > summary { transition: color 180ms ease, background-color 180ms ease; }
+.linen-disclosure > summary:is(:hover, :focus-visible) { color: var(--color-amber-dark); }
+
+@supports selector(details::details-content) {
+  .linen-disclosure::details-content {
+    opacity: 0;
+    transition: opacity 220ms ease, content-visibility 220ms allow-discrete;
+  }
+
+  .linen-disclosure[open]::details-content { opacity: 1; }
+
+  @supports (interpolate-size: allow-keywords) {
+    .linen-disclosure::details-content {
+      interpolate-size: allow-keywords;
+      block-size: 0;
+      overflow: clip;
+      transition: opacity 220ms ease, block-size 220ms ease, content-visibility 220ms allow-discrete;
+    }
+
+    .linen-disclosure[open]::details-content { block-size: auto; }
+  }
+}

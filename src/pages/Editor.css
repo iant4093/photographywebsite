@@ -95,6 +95,10 @@
     cursor: pointer;
 }
 
+.editor-page :is(.editor-toolbar, .editor-sidebar, .editor-viewbar) button:not(.site-select-trigger) {
+    transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease;
+}
+
 .editor-toolbar button:hover:not(:disabled),
 .editor-sidebar button:hover:not(:disabled),
 .editor-viewbar button:hover:not(:disabled),

@@ -77,7 +77,11 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
+  transition: color 180ms ease;
 }
+
+.linen-site :is(.archive-search-input-wrap, .archive-search-summary, .archive-search-error, .archive-search-empty)
+    button:is(:hover, :focus-visible) { color: var(--color-charcoal); }
 
 .linen-site .archive-search-filter-grid {
   display: grid;

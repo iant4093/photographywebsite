@@ -69,6 +69,7 @@ function GalleryCard({ album, position, duplicate, responsiveSrcSet }) {
         <Link
             {...intent}
             data-camera-cursor="photo"
+            data-route-card="floating"
             to={albumPath(album)}
             className="floating-print-card"
             aria-label={`View ${album.title}`}

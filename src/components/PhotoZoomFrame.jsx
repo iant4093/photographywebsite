@@ -10,7 +10,7 @@ function freshDetail(src) {
 }
 
 // The fitted frame owns the border and clipping; only its image is transformed.
-export default function PhotoZoomFrame({ bounds, loaded = false, visible = true, outgoing = false, ...imageProps }) {
+export default function PhotoZoomFrame({ bounds, loaded = false, visible = true, outgoing = false, fading = false, ...imageProps }) {
     const [naturalSize, setNaturalSize] = useState(null)
     const [zoom, setZoom] = useState(INITIAL_ZOOM)
     const panRef = useRef(null)
@@ -126,7 +126,7 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
     return (
         <Frame
             type={outgoing ? undefined : 'button'}
-            className={`linen-lightbox-photo-frame ${loaded ? 'is-loaded' : ''} ${outgoing ? 'is-outgoing' : ''} ${visible ? '' : 'is-hidden'} ${zoom.zoomed ? 'is-zoomed' : ''} ${zoom.panning ? 'is-panning' : ''}`}
+            className={`linen-lightbox-photo-frame ${loaded ? 'is-loaded' : ''} ${outgoing ? 'is-outgoing' : ''} ${fading ? 'is-fading' : ''} ${visible ? '' : 'is-hidden'} ${zoom.zoomed ? 'is-zoomed' : ''} ${zoom.panning ? 'is-panning' : ''}`}
             style={{ width: fit === null ? undefined : width * fit, height: fit === null ? undefined : height * fit }}
             disabled={outgoing ? undefined : !interactive}
             aria-hidden={outgoing || !visible || undefined}

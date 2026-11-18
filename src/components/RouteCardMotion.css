@@ -1,0 +1,88 @@
+.linen-site .floating-print-wall[data-route-card-hold] .floating-loop-track {
+    animation-play-state: paused;
+}
+
+.linen-site .linen-nav[data-route-card-navbar] {
+    transition: none;
+}
+
+.linen-site .linen-nav[data-route-card-navbar="shown"] {
+    translate: 0 0;
+}
+
+.linen-site .linen-nav[data-route-card-navbar="hidden"] {
+    translate: 0 -100%;
+}
+
+main[data-route-page-staged],
+main[data-route-page-staged] ~ footer,
+main[data-route-page-preparing],
+main[data-route-page-preparing] ~ footer {
+    opacity: 0;
+}
+
+main[data-route-page-staged]:not([data-route-page-revealing]),
+main[data-route-page-staged]:not([data-route-page-revealing]) ~ footer {
+    pointer-events: none;
+}
+
+main[data-route-page-staged]:not([data-route-page-revealing]) .skeleton-shimmer {
+    animation-play-state: paused;
+}
+
+[data-route-card-morph] {
+    position: fixed;
+    inset: 0;
+    z-index: 44;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.route-card-outline,
+.route-card-title,
+.route-card-photo-strip,
+.route-card-photo-strip > * {
+    position: absolute;
+}
+
+.route-card-photo-strip { overflow: hidden; }
+
+.route-card-title-window {
+    position: absolute;
+    inset: 0;
+}
+
+.route-card-outline {
+    transform-origin: top left;
+    border: 1px solid color-mix(in srgb, var(--color-charcoal) 42%, transparent);
+}
+
+.route-card-title {
+    inset: 0 auto auto 0;
+    transform-origin: top left;
+}
+
+[data-route-title-landing] {
+    opacity: 0;
+}
+
+main > [data-route-faded].animate-fade-in,
+[data-route-faded] .linen-hero-copy.animate-fade-in,
+[data-route-faded] .linen-gallery-header .animate-slide-up,
+.photo-stats-page[data-route-faded="return"] > .photo-stats-content {
+    animation: none;
+}
+
+.linen-site main[data-route-page-returning] :is(.album-card, .floating-print-card, .photo-stats-timeline-card),
+.linen-site [data-route-card-resting] {
+    --album-tilt-x: 0deg !important;
+    --album-tilt-y: 0deg !important;
+    --album-tilt-scale: 1 !important;
+    --editorial-hover-scale: 0 !important;
+    --timeline-hover-y: 0px !important;
+}
+
+.linen-site main[data-route-page-returning] .album-card h3,
+.linen-site .album-card[data-route-card-resting] h3 {
+    color: var(--color-charcoal);
+}

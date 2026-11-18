@@ -194,10 +194,11 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
     const printImage = async (event, image) => {
         event.stopPropagation()
         if (!image) return
+        const returnFocusTo = event.currentTarget
         try {
             let token = null
             try { token = await getIdToken() } catch { /* public album */ }
-            await openPrintOrder(() => requestAlbumPrintSession(albumId, mediaId(image), token))
+            await openPrintOrder(() => requestAlbumPrintSession(albumId, mediaId(image), token), returnFocusTo)
         } catch (error) {
             console.error('Print order failed:', error)
             alert(error?.message || 'The print store could not be opened. Please try again.')

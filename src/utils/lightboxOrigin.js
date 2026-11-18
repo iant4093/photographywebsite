@@ -24,7 +24,7 @@ export function rememberLightboxTrigger(element, kind, key, visual = element) {
     element.focus({ preventScroll: true })
     if (prefersReducedLightboxMotion()) return null
     const rect = lightboxRect(visual)
-    if (!rect) return null
+    if (!rect && kind !== 'photo') return null
     if (element.animate) void preloadLightboxMotion()
     const image = visual.querySelector('img')
     const style = getComputedStyle(visual)

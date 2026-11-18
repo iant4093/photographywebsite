@@ -50,7 +50,8 @@
 .print-order-modal__header { display: flex; gap: 1rem; align-items: center; justify-content: space-between; padding: .5rem 1rem; color: #fff9ee; background: #171613; z-index: 1; border-bottom: 1px solid #655e54; }
 .print-order-modal__header nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .8rem; }
 .print-order-modal__header a { text-decoration: underline; text-underline-offset: .2em; padding: .5rem 0; }
-.print-order-modal__header button { padding: .5rem .8rem; border: 1px solid #b4a895; min-height: 44px; cursor: pointer; }
+.print-order-modal__header button { padding: .5rem .8rem; border: 1px solid #b4a895; min-height: 44px; cursor: pointer; transition: background-color 180ms ease; }
+.print-order-modal__header button:hover { background: #292620; }
 .print-order-modal__header :focus-visible { outline: 2px solid #fff9ee; outline-offset: 3px; }
 
 .print-order-modal__loading.is-hidden {

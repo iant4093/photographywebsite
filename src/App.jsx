@@ -18,6 +18,7 @@ import { usesAdminChrome } from './utils/adminRoutes'
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const CameraCursor = lazy(() => import('./components/CameraCursor'))
 const MotionExperience = lazy(() => import('./components/MotionExperience'))
+const RouteCardMotion = lazy(() => import('./components/RouteCardMotion'))
 const MistyEcho = lazy(() => import('./components/MistyEcho').catch(() => ({ default: () => null })))
 const Search = lazy(() => import('./pages/Search'))
 const TvMode = lazy(() => import('./pages/TvMode'))
@@ -98,6 +99,7 @@ function App() {
     return (
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} ${isImmersiveRoute ? 'linen-immersive' : ''} min-h-screen flex flex-col bg-cream`}>
             <RouteScrollRestoration />
+            <RecoveryBoundary optional><Suspense fallback={null}><RouteCardMotion /></Suspense></RecoveryBoundary>
             <DocumentMetadata />
             <RecoveryBoundary optional><Suspense fallback={null}><AnalyticsTracker /></Suspense></RecoveryBoundary>
             <RecoveryBoundary optional><Suspense fallback={null}><CameraCursor enabled={!isImmersiveRoute} routeKey={location.pathname} /></Suspense></RecoveryBoundary>

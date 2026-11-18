@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import './SiteSelect.css'
 
 const PALETTE = ['cream', 'cream-dark', 'charcoal', 'amber', 'amber-dark', 'warm-gray', 'warm-border']
+const MENU_EXIT_MS = 220
 
 // Select-only and editable, manual-selection comboboxes share one site-rendered
 // popup. DOM focus stays on the control; aria-activedescendant follows choices.
@@ -43,9 +44,19 @@ export default function SiteSelect({
         : items, [currentValue, editable, items])
     const available = visibleItems.filter(option => !option.disabled)
     const active = available.find(option => option.value === activeValue)
-    const expanded = open && !disabled
+    const expanded = Boolean(portalRoot && open && !disabled)
     const invalidValue = required && (!currentValue || (!editable && (!selected || selected.disabled)))
     const showError = invalid && invalidValue && !disabled
+
+    useEffect(() => {
+        if (expanded || !portalRoot) return undefined
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        const timer = window.setTimeout(() => {
+            setPortalRoot(null)
+            setPlacement(null)
+        }, reduced ? 0 : MENU_EXIT_MS + 50)
+        return () => window.clearTimeout(timer)
+    }, [expanded, portalRoot])
 
     function showMenu() {
         setPortalRoot(document.fullscreenElement || controlRef.current?.closest('dialog, [role="dialog"]') || document.body)
@@ -103,6 +114,7 @@ export default function SiteSelect({
                 left: Math.max(leftEdge + 8, Math.min(rect.left, leftEdge + width - menuWidth - 8)),
                 top: flip ? Math.max(topEdge + 8, rect.top - Math.min(menu?.scrollHeight || maxHeight, maxHeight) - 6) : rect.bottom + 6,
                 width: menuWidth, maxHeight,
+                '--site-select-enter-y': flip ? '4px' : '-4px',
                 ...Object.fromEntries(PALETTE.map(color => [`--color-${color}`, colors.getPropertyValue(`--color-${color}`)])),
             }
             setPlacement(previous => previous && Object.keys(nextPlacement).every(key => previous[key] === nextPlacement[key])
@@ -225,10 +237,19 @@ export default function SiteSelect({
             )}
             {!editable && name && <input type="hidden" name={name} value={currentValue} disabled={disabled} />}
             {showError && <span id={errorId} className="site-select-error" role="alert">Choose an option.</span>}
-            {expanded && createPortal(
+            {portalRoot && createPortal(
                 <div ref={menuRef} id={listId} role="listbox"
-                    aria-label={props['aria-label']} aria-labelledby={props['aria-labelledby'] || (!props['aria-label'] ? controlId : undefined)}
-                    className="site-select-menu" style={{ ...placement, visibility: placement ? 'visible' : 'hidden' }}>
+                    aria-label={expanded ? props['aria-label'] : undefined}
+                    aria-labelledby={expanded ? props['aria-labelledby'] || (!props['aria-label'] ? controlId : undefined) : undefined}
+                    aria-hidden={expanded ? undefined : true} inert={expanded ? undefined : true}
+                    className="site-select-menu" data-open={expanded ? '' : undefined}
+                    data-placed={placement ? '' : undefined} style={placement ?? undefined}
+                    onTransitionEnd={event => {
+                        if (!expanded && event.target === event.currentTarget && event.propertyName === 'opacity') {
+                            setPortalRoot(null)
+                            setPlacement(null)
+                        }
+                    }}>
                     {groupItems(visibleItems).map(({ group, entries }, groupIndex) => {
                         const rendered = entries.map(({ option, index }) => (
                         <div key={option.value} id={`${listId}-${index}`} role="option"

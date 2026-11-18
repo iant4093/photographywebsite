@@ -1,6 +1,7 @@
 import { selectChoice } from '../test/selectChoice'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render as renderView, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -138,6 +139,8 @@ function canvasContext() {
 }
 
 import Editor from './Editor'
+
+const render = (view) => renderView(view, { wrapper: MemoryRouter })
 
 describe('Photo Editor page', () => {
     beforeEach(() => {

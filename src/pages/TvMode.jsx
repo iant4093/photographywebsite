@@ -429,53 +429,49 @@ export default function TvMode() {
                     disabled={count < 2} tabIndex={showControls ? 0 : -1}>{Icon.next}</button>
             </div>
 
-            {panel === 'airplay' && (
-                <div className="tv-panel" role="dialog" aria-label="Show on Apple TV">
-                    <div className="tv-setting">
-                        <span className="tv-setting-label">Show on Apple TV</span>
-                        <ol className="tv-steps">
-                            {isAppleTouchDevice() ? (
-                                <>
-                                    <li>Open Control Center.</li>
-                                    <li>Tap <strong>Screen Mirroring</strong> and choose your Apple TV or AirPlay TV.</li>
-                                    <li>Hold your iPhone or iPad sideways so the slideshow fills the TV.</li>
-                                </>
-                            ) : (
-                                <>
-                                    <li>Click <strong>Control Center</strong> in the menu bar.</li>
-                                    <li>Click <strong>Screen Mirroring</strong> and choose your Apple TV or AirPlay TV.</li>
-                                    <li>Press <strong>F</strong> for full screen.</li>
-                                </>
-                            )}
-                        </ol>
-                    </div>
-                    <p className="tv-hint">The slideshow keeps this screen awake while it plays.</p>
+            <div className="tv-panel" role="dialog" aria-label="Show on Apple TV" hidden={panel !== 'airplay'} inert={panel !== 'airplay'}>
+                <div className="tv-setting">
+                    <span className="tv-setting-label">Show on Apple TV</span>
+                    <ol className="tv-steps">
+                        {isAppleTouchDevice() ? (
+                            <>
+                                <li>Open Control Center.</li>
+                                <li>Tap <strong>Screen Mirroring</strong> and choose your Apple TV or AirPlay TV.</li>
+                                <li>Hold your iPhone or iPad sideways so the slideshow fills the TV.</li>
+                            </>
+                        ) : (
+                            <>
+                                <li>Click <strong>Control Center</strong> in the menu bar.</li>
+                                <li>Click <strong>Screen Mirroring</strong> and choose your Apple TV or AirPlay TV.</li>
+                                <li>Press <strong>F</strong> for full screen.</li>
+                            </>
+                        )}
+                    </ol>
                 </div>
-            )}
+                <p className="tv-hint">The slideshow keeps this screen awake while it plays.</p>
+            </div>
 
-            {panel === 'settings' && (
-                <div className="tv-panel" role="dialog" aria-label="Slideshow settings">
-                    <Choice label="Each photo" value={settings.interval} onChange={(value) => change('interval', value)}
-                        options={TV_INTERVALS.map((value) => ({ value, label: value < 60 ? `${value}s` : '1m' }))} />
-                    <Choice label="Order" value={settings.order} onChange={(value) => change('order', value)}
-                        options={[{ value: 'shuffle', label: 'Shuffle' }, { value: 'newest', label: 'Newest first' }]} />
-                    <Choice label="Background" value={settings.background} onChange={(value) => change('background', value)}
-                        options={[{ value: 'blur', label: 'Soft glow' }, { value: 'dark', label: 'Dark' }]} />
-                    <div className="tv-setting">
-                        <span className="tv-setting-label">Show</span>
-                        <div className="tv-toggles">
-                            <Toggle label="Slow zoom" checked={settings.motion} onChange={(value) => change('motion', value)} />
-                            <Toggle label="Clock" checked={settings.clock} onChange={(value) => change('clock', value)} />
-                            <Toggle label="Album & camera" checked={settings.caption} onChange={(value) => change('caption', value)} />
-                            <Toggle label="Progress bar" checked={settings.progress} onChange={(value) => change('progress', value)} />
-                        </div>
+            <div className="tv-panel" role="dialog" aria-label="Slideshow settings" hidden={panel !== 'settings'} inert={panel !== 'settings'}>
+                <Choice label="Each photo" value={settings.interval} onChange={(value) => change('interval', value)}
+                    options={TV_INTERVALS.map((value) => ({ value, label: value < 60 ? `${value}s` : '1m' }))} />
+                <Choice label="Order" value={settings.order} onChange={(value) => change('order', value)}
+                    options={[{ value: 'shuffle', label: 'Shuffle' }, { value: 'newest', label: 'Newest first' }]} />
+                <Choice label="Background" value={settings.background} onChange={(value) => change('background', value)}
+                    options={[{ value: 'blur', label: 'Soft glow' }, { value: 'dark', label: 'Dark' }]} />
+                <div className="tv-setting">
+                    <span className="tv-setting-label">Show</span>
+                    <div className="tv-toggles">
+                        <Toggle label="Slow zoom" checked={settings.motion} onChange={(value) => change('motion', value)} />
+                        <Toggle label="Clock" checked={settings.clock} onChange={(value) => change('clock', value)} />
+                        <Toggle label="Album & camera" checked={settings.caption} onChange={(value) => change('caption', value)} />
+                        <Toggle label="Progress bar" checked={settings.progress} onChange={(value) => change('progress', value)} />
                     </div>
-                    <p className="tv-hint">
-                        {cast.connected ? 'Keep this page open while casting; the TV follows it. ' : ''}
-                        Space pauses · ← → move · F full screen · Esc closes
-                    </p>
                 </div>
-            )}
+                <p className="tv-hint">
+                    {cast.connected ? 'Keep this page open while casting; the TV follows it. ' : ''}
+                    Space pauses · ← → move · F full screen · Esc closes
+                </p>
+            </div>
         </div>
     )
 }

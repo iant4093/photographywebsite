@@ -43,7 +43,7 @@ function findContainer(path) {
 
 // Observe layout instead of guessing how many milliseconds an API, lazy chunk,
 // font, or image will need. Never save a clamped intermediate restoration.
-export function watchScrollPosition({ key, route, restore, restoreRoute, fallback, hash, preserve }) {
+export function watchScrollPosition({ key, historyKey, historyTraversal, route, restore, restoreRoute, fallback, hash, preserve }) {
     if (!positions.size) readPositions()
     const saved = restore ? positions.get(key) || (restoreRoute ? positions.get(`return:${route}`) : null) : null
     let target = saved || (fallback !== undefined ? { top: fallback, left: 0 } : null)
@@ -57,7 +57,13 @@ export function watchScrollPosition({ key, route, restore, restoreRoute, fallbac
     let settledTimer = 0
     const root = document.documentElement
     const oldAnchor = root.style.overflowAnchor
+    const restoreTop = target && restore ? String(target.top) : undefined
     if (pending) root.style.overflowAnchor = 'none'
+    if (restoreTop !== undefined) root.dataset.routeScrollRestoring = restoreTop
+    const ownsEntry = () => historyKey === undefined || (
+        (window.history.state?.key || 'default') === historyKey
+        && window.location.pathname + window.location.search + window.location.hash === route + (hash || '')
+    )
 
     const remember = () => {
         const value = { ...current, containers }
@@ -67,13 +73,14 @@ export function watchScrollPosition({ key, route, restore, restoreRoute, fallbac
     const finish = () => {
         pending = false
         root.style.overflowAnchor = oldAnchor
+        if (root.dataset.routeScrollRestoring === restoreTop) delete root.dataset.routeScrollRestoring
         resize?.disconnect()
         mutations.disconnect()
         window.clearTimeout(settledTimer)
     }
     const attempt = () => {
         frame = 0
-        if (disposed || !pending || locked()) return
+        if (disposed || !pending || locked() || !ownsEntry()) return
         const main = document.getElementById('main-content')
         if (main?.querySelector('[data-route-loading]')) return
         const busy = main?.querySelector('[aria-busy="true"], [data-scroll-loading="true"]')
@@ -91,20 +98,22 @@ export function watchScrollPosition({ key, route, restore, restoreRoute, fallbac
         }
         if (!target) return
         restoring = true
-        window.scrollTo({ top: target.top, left: target.left || 0, behavior: 'instant' })
+        if (Math.abs(window.scrollY - target.top) > 1 || Math.abs(window.scrollX - (target.left || 0)) > 1) {
+            window.scrollTo({ top: target.top, left: target.left || 0, behavior: 'instant' })
+        }
         restoring = false
         let reached = Math.abs(window.scrollY - target.top) <= 1
         for (const [path, position] of Object.entries(containers)) {
             const element = findContainer(path)
             if (!element) { reached = false; continue }
-            element.scrollTop = position.top
-            element.scrollLeft = position.left
+            if (Math.abs(element.scrollTop - position.top) > 1) element.scrollTop = position.top
+            if (Math.abs(element.scrollLeft - position.left) > 1) element.scrollLeft = position.left
             if (Math.abs(element.scrollTop - position.top) > 1 || Math.abs(element.scrollLeft - position.left) > 1) reached = false
         }
         // A short stable layout window covers fonts/images immediately after
         // mounting. Resize/mutation events restart it; user input ends it.
         window.clearTimeout(settledTimer)
-        if (reached && !busy) settledTimer = window.setTimeout(finish, 250)
+        if (reached && !busy) settledTimer = window.setTimeout(finish, historyTraversal ? 700 : 250)
     }
     const schedule = () => {
         if (!frame && pending) frame = window.requestAnimationFrame(attempt)
@@ -120,20 +129,31 @@ export function watchScrollPosition({ key, route, restore, restoreRoute, fallbac
         window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
     }
     const save = () => {
-        if (pending || restoring || locked()) return
+        if (restoring || locked() || !ownsEntry()) return
+        if (pending) {
+            if (target && Math.abs(window.scrollY - target.top) > 1) schedule()
+            return
+        }
         current = offset()
         remember()
     }
     const saveContainer = event => {
-        if (pending || locked()) return
+        if (pending || locked() || !ownsEntry()) return
         const path = containerPath(event.target)
         if (path === null) return
         containers = { ...containers, [path]: { top: event.target.scrollTop, left: event.target.scrollLeft } }
         remember()
     }
+    const saveClick = event => {
+        save()
+        const row = event.target instanceof Element && event.target.closest('[data-route-card]')
+            ?.closest('[data-scroll-row], .photo-stats-timeline-scroll')
+        if (row) saveContainer({ target: row })
+    }
     const interrupt = event => {
         if (event.type === 'keydown' && !['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
-        if (locked()) return
+        if (event.type === 'wheel' && (event.deltaY === 0 || Math.abs(event.deltaX) > Math.abs(event.deltaY))) return
+        if (locked() || !ownsEntry()) return
         if (pending) {
             finish()
             target = null
@@ -142,12 +162,12 @@ export function watchScrollPosition({ key, route, restore, restoreRoute, fallbac
     }
     const pagehide = () => { save(); persist() }
     // Capture clicks before React navigation can replace the document content.
-    document.addEventListener('click', save, true)
+    document.addEventListener('click', saveClick, true)
     document.addEventListener('scroll', saveContainer, { capture: true, passive: true })
     window.addEventListener('scroll', save, { passive: true })
     window.addEventListener('pagehide', pagehide)
     window.addEventListener('wheel', interrupt, { passive: true })
-    window.addEventListener('touchstart', interrupt, { passive: true })
+    window.addEventListener('touchmove', interrupt, { passive: true })
     window.addEventListener('keydown', interrupt)
     return () => {
         disposed = true
@@ -157,12 +177,12 @@ export function watchScrollPosition({ key, route, restore, restoreRoute, fallbac
         persist()
         finish()
         window.cancelAnimationFrame(frame)
-        document.removeEventListener('click', save, true)
+        document.removeEventListener('click', saveClick, true)
         document.removeEventListener('scroll', saveContainer, true)
         window.removeEventListener('scroll', save)
         window.removeEventListener('pagehide', pagehide)
         window.removeEventListener('wheel', interrupt)
-        window.removeEventListener('touchstart', interrupt)
+        window.removeEventListener('touchmove', interrupt)
         window.removeEventListener('keydown', interrupt)
     }
 }

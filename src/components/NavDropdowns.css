@@ -22,15 +22,19 @@
   padding-top: 1px;
   visibility: hidden;
   opacity: 0;
-  transform: translate(-50%, -6px);
-  transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms;
+  transform: translate(-50%, -4px);
+  transition: opacity 220ms ease, transform 220ms ease, visibility 0s linear 220ms;
 }
 
 .linen-site .linen-nav-dropdown.is-open .linen-nav-dropdown-panel {
   visibility: visible;
   opacity: 1;
   transform: translate(-50%, 0);
-  transition: opacity 180ms ease, transform 180ms ease, visibility 0s;
+  transition: opacity 460ms cubic-bezier(.42, 0, .45, 1), transform 460ms cubic-bezier(.42, 0, .45, 1), visibility 0s;
+}
+
+.linen-site .linen-nav-dropdown-panel[data-navigation-dismissal] {
+  transition: none;
 }
 
 .linen-site .linen-nav-dropdown-inner {

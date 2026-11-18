@@ -121,6 +121,7 @@ describe('small presentational and routing components', () => {
     expect(window.sessionStorage.getItem('ian-photography-admin-dashboard-scroll')).toBe('640')
     first.unmount()
 
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
     window.scrollTo.mockClear()
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       callback()
@@ -139,6 +140,7 @@ describe('small presentational and routing components', () => {
     clearRouteScrollPositions()
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 515 })
     saveVerticalScroll('/apps')
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
     window.scrollTo.mockClear()
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       callback()

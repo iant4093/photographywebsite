@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { prefetchPublicAlbum } from '../utils/api'
+import { albumHandle } from '../utils/albumRoutes'
 import { preloadAlbumRoute } from '../utils/routePreload'
 
 export default function useAlbumIntent(album) {
@@ -12,7 +13,7 @@ export default function useAlbumIntent(album) {
         cancel()
         if (album?.visibility !== 'public') return
         void preloadAlbumRoute(album).catch(() => {})
-        void prefetchPublicAlbum(album.albumId)
+        void prefetchPublicAlbum(albumHandle(album))
     }, [album, cancel])
     const schedule = useCallback(() => {
         if (timer.current !== null || navigator.connection?.saveData) return

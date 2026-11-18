@@ -1,7 +1,7 @@
 import usePhotoSections from '../hooks/usePhotoSections'
 import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../context/auth'
 import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
@@ -49,6 +49,9 @@ function UserDashboard() {
 
     // Save scroll position before entering an album detail view
     const savedScrollY = useRef(0)
+    useLayoutEffect(() => {
+        if (selectedAlbum) window.scrollTo({ top: 0, behavior: 'instant' })
+    }, [selectedAlbum])
 
     const loadAlbums = useCallback(async ({ signal, background = false } = {}) => {
         if (!userEmail) return []
@@ -242,13 +245,14 @@ function UserDashboard() {
     const printImage = async (event, image) => {
         event.stopPropagation()
         if (!image || !selectedAlbum?.albumId) return
+        const returnFocusTo = event.currentTarget
         try {
             const token = await getIdToken()
             await openPrintOrder(() => requestAlbumPrintSession(
                 selectedAlbum.albumId,
                 mediaId(image),
                 token,
-            ))
+            ), returnFocusTo)
         } catch (error) {
             console.error('Print order failed:', error)
             alert(error?.message || 'The print store could not be opened. Please try again.')
@@ -259,9 +263,9 @@ function UserDashboard() {
     const videoAlbums = useMemo(() => albums.filter(a => a.type === 'video'), [albums]);
 
     const pageVariants = {
-        initial: { opacity: 0, y: 15 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+        initial: { opacity: 0 },
+        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
 
@@ -279,8 +283,9 @@ function UserDashboard() {
                 {/* Albums grid or selected album view */}
                 {selectedAlbum ? (
                     /* Album detail view */
-                    <div className="linen-gallery-page linen-gallery-page-embedded animate-fade-in">
+                    <div data-inline-album className="linen-gallery-page linen-gallery-page-embedded animate-fade-in">
                         <button
+                            data-inline-album-back
                             onClick={() => {
                                 selectedImageScopeRef.current?.controller.abort()
                                 selectedImageScopeRef.current = null
@@ -345,7 +350,7 @@ function UserDashboard() {
                     /* Albums grid */
                     <>
                         {loading ? (
-                            <div className="py-20">
+                            <div className="py-20" data-route-loading>
                                 <SkeletonGrid count={6} type="photo" />
                             </div>
                         ) : albums.length === 0 ? (

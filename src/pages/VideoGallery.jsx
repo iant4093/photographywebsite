@@ -4,11 +4,9 @@ import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils
 import { useAuth } from '../context/auth'
 import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
-import VideoPlayer from '../components/VideoPlayer'
-import AccessibleLightbox from '../components/AccessibleLightbox'
+import VideoLightbox from '../components/VideoLightbox'
 import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import { takeVideoNavigation } from '../utils/lightboxNavigation'
-import LightboxShareButton from '../components/LightboxShareButton'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
@@ -209,9 +207,9 @@ function VideoGalleryContent({ albumId }) {
     }
 
     const pageVariants = {
-        initial: { opacity: 0, y: 15 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+        initial: { opacity: 0 },
+        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
     if (loading) {
@@ -221,6 +219,7 @@ function VideoGalleryContent({ albumId }) {
                 initial="initial"
                 animate="animate"
                 exit="exit"
+                data-route-loading=""
                 className="max-w-7xl mx-auto px-6 flex justify-center py-32"
             >
                 <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
@@ -355,102 +354,11 @@ function VideoGalleryContent({ albumId }) {
 
             {/* Video Lightbox Player */}
             {lightboxIndex !== null && images[lightboxIndex] && (
-                <AccessibleLightbox
-                    motion={{ kind: 'video', key: mediaId(images[lightboxIndex]), origin: motionOrigin }}
-                    ariaLabel={`Video player for ${album.title}`}
-                    onClose={closeLightbox}
-                    onNext={images.length > 1 ? goNext : undefined}
-                    onPrevious={images.length > 1 ? goPrev : undefined}
-                    className="linen-responsive-lightbox linen-video-lightbox fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12"
-                >
-                    {/* Close button */}
-                    <button
-                        type="button"
-                        onClick={closeLightbox}
-                        className="linen-lightbox-close fixed z-[1001] w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
-                        style={{
-                            top: 'max(1rem, calc(env(safe-area-inset-top) + 0.5rem))',
-                            right: 'max(1rem, calc(env(safe-area-inset-right) + 0.5rem))',
-                        }}
-                        title="Close Player"
-                        aria-label="Close video player"
-                        data-camera-cursor="close"
-                        data-lightbox-initial-focus
-                    >
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-
-                    {/* React Player Container */}
-                    <div className="linen-lightbox-content flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
-                        <VideoPlayer
-                            videoInfo={images[lightboxIndex]}
-                            autoplay={true}
-                            controls={true}
-                            onMediaError={requestMediaRefresh}
-                        />
-                    </div>
-
-                    <div className="linen-lightbox-footer">
-                        {images.length > 1 && (
-                            <nav className="linen-lightbox-nav" aria-label="Video navigation">
-                                <button
-                                    onClick={goPrev}
-                                    className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                    aria-label="Previous video"
-                                    data-camera-cursor="previous"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                    </svg>
-                                </button>
-                                <button
-                                    onClick={goNext}
-                                    className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                    aria-label="Next video"
-                                    data-camera-cursor="next"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                    </svg>
-                                </button>
-                            </nav>
-                        )}
-
-                        {/* Share, download & counter */}
-                        <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
-                            <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
-                                {album.visibility === 'public' && (
-                                    <LightboxShareButton
-                                        media={images[lightboxIndex]}
-                                        index={lightboxIndex}
-                                        mediaType="video"
-                                        shareTitle={`${album.title} — Ian Truong Photography`}
-                                        shareUrl={video => shareUrlForAlbumVideo(albumHandle({ ...album, albumId }), mediaId(video))}
-                                    />
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={downloadOriginal}
-                                    className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                                    title="Download Video"
-                                    aria-label="Download video"
-                                >
-                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    <span>Download</span>
-                                </button>
-                            </div>
-                            {images.length > 1 && (
-                                <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
-                                    {lightboxIndex + 1} / {images.length}
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </AccessibleLightbox>
+                <VideoLightbox images={images} index={lightboxIndex} title={album.title} motionOrigin={motionOrigin}
+                    onClose={closeLightbox} onNext={goNext} onPrevious={goPrev} onDownload={downloadOriginal}
+                    onMediaError={requestMediaRefresh}
+                    shareUrl={album.visibility === 'public'
+                        ? video => shareUrlForAlbumVideo(albumHandle({ ...album, albumId }), mediaId(video)) : undefined} />
             )}
         </motion.div>
     )

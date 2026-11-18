@@ -284,6 +284,7 @@ function TimelineCard({ album, index, position }) {
         <Link
             ref={cardRef}
             className="photo-stats-timeline-card"
+            data-route-card="timeline"
             data-timeline-position={position}
             to={albumRoute(album)}
             onClick={event => rememberVideoNavigation(albumRoute(album), event, imageContainer.current)}
@@ -374,7 +375,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
     }
 
     return (
-        <section className="photo-stats-timeline-section photo-stats-motion-section" aria-labelledby="album-timeline-heading">
+        <section className="photo-stats-timeline-section photo-stats-motion-section" data-scroll-title-static="" aria-labelledby="album-timeline-heading">
             <div className="photo-stats-timeline-heading">
                 <h2 id="album-timeline-heading">Album Timeline</h2>
                 <div className="photo-stats-timeline-controls" aria-label="Album timeline controls">
@@ -536,7 +537,7 @@ export default function Stats() {
 
     return (
         <div className="photo-stats-page">
-            <header className="photo-stats-hero">
+            <header className="photo-stats-hero" data-scroll-title-static="">
                 <div className="photo-stats-title-row">
                     <h1>Photography <em>Stats</em></h1>
                 </div>
@@ -594,7 +595,7 @@ export default function Stats() {
                     </section>
 
                     {report.calendar?.days?.length > 0 && (
-                        <section className="photo-stats-motion-section" aria-labelledby="shooting-calendar-heading">
+                        <section className="photo-stats-motion-section" data-scroll-title-static="" aria-labelledby="shooting-calendar-heading">
                             <SectionHeading id="shooting-calendar-heading" title="Shooting Calendar" />
                             <ShootingCalendar calendar={report.calendar} albums={timelineAlbums} routeFor={albumRoute} />
                         </section>

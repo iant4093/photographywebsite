@@ -1,4 +1,5 @@
 import { persistentStorage, tabStorage } from '../utils/browserStorage'
+import '../components/DisclosureMotion.css'
 /* eslint-disable react-hooks/immutability -- Three.js cameras are intentionally mutable scene objects. */
 import { addAfterEffect, Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { decode as decodeBlurhash } from 'blurhash'
@@ -6132,7 +6133,7 @@ export default function ImmersiveGalleryDesktop() {
                         {activeRoomId ? 'Continue exploring' : 'Begin walk-through'}
                     </button>
                     <div>{touchMode ? 'Joystick to move · Drag to look · Tap Jump to hop' : <><kbd>WASD</kbd> to move · <kbd>Mouse</kbd> to look · <kbd>Space</kbd> to jump · <kbd>Esc</kbd> to pause</>}</div>
-                    <details className="museum-experience-settings">
+                    <details className="museum-experience-settings linen-disclosure">
                         <summary>Experience settings</summary>
                         <div>
                             <label>

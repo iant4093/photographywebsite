@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './PrintOrderModal.css'
 
@@ -11,7 +11,20 @@ export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
     const restoreFocusRef = useRef(null)
     const restoreDialogRef = useRef(null)
     const restoreLabelRef = useRef(null)
+    const closing = useRef(null)
     const portalTarget = typeof document === 'undefined' ? null : document.body
+
+    const requestClose = useCallback(() => {
+        if (closing.current) return
+        const dialog = dialogRef.current
+        if (!dialog?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            onClose()
+            return
+        }
+        closing.current = dialog.animate([{ opacity: getComputedStyle(dialog).opacity }, { opacity: 0 }],
+            { duration: 190, easing: 'ease-in-out', fill: 'forwards' })
+        closing.current.finished.then(onClose, () => {})
+    }, [onClose])
 
     useEffect(() => {
         if (!src) return undefined
@@ -41,7 +54,7 @@ export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') {
                 event.preventDefault()
-                onClose()
+                requestClose()
                 return
             }
             if (event.key !== 'Tab') return
@@ -64,13 +77,15 @@ export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
                 && event.source === frameRef.current?.contentWindow
                 && event.data?.type === 'ian-photography:close-print-dialog'
             ) {
-                onClose()
+                requestClose()
             }
         }
         window.addEventListener('keydown', handleKeyDown)
         window.addEventListener('message', handleFrameMessage)
 
         return () => {
+            closing.current?.cancel()
+            closing.current = null
             window.removeEventListener('keydown', handleKeyDown)
             window.removeEventListener('message', handleFrameMessage)
             if (!alreadyLocked) document.body.style.overflow = previousOverflow
@@ -89,7 +104,7 @@ export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
                 replacement?.focus({ preventScroll: true })
             }
         }
-    }, [onClose, src, returnFocusTo])
+    }, [requestClose, src, returnFocusTo])
 
     if (!portalTarget || !src) return null
 
@@ -101,7 +116,7 @@ export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
             aria-modal="true"
             aria-label="Print options"
             onMouseDown={(event) => {
-                if (event.target === event.currentTarget) onClose()
+                if (event.target === event.currentTarget) requestClose()
             }}
         >
             <div className="print-order-modal__panel">
@@ -112,7 +127,7 @@ export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
                         <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
                         <a href="mailto:iant4093@gmail.com?subject=Print%20order%20support">Order help</a>
                     </nav>
-                    <button type="button" onClick={onClose} aria-label="Close print options">Close</button>
+                    <button type="button" onClick={requestClose} aria-label="Close print options">Close</button>
                 </div>
                 <div className={`print-order-modal__loading ${loaded ? 'is-hidden' : ''}`} role="status">
                     Preparing print options…

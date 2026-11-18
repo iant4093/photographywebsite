@@ -1,5 +1,6 @@
 import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { COLOR_CHANNELS, freshAdjustments, freshGeometry, sanitizeAdjustments, sanitizeGeometry } from '../editor/adjustments'
 import { BUILT_IN_PRESETS, applyPreset, parseSettings, serializeSettings } from '../editor/presets'
 import { canvasToBlob, cropForAspect, drawGeometry, drawGeometryAtSize, fittedGeometryDimensions, outputDimensions } from '../editor/canvas'
@@ -10,7 +11,9 @@ import { ColorWheel, ToneCurve } from '../editor/DirectControls'
 import { anchoredPan } from '../editor/directControlMath'
 import { createLivePreviewRenderer } from '../editor/livePreviewRenderer'
 import { workerRequest } from '../editor/workerClient'
+import './Explore.css'
 import './Editor.css'
+import '../components/DisclosureMotion.css'
 
 const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/avif,.dng,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.srw,.3fr,.fff,.iiq,.x3f,.raw'
 const PREVIEW_QUALITY_KEY = 'ian-photo-editor-preview-quality-v1'
@@ -107,7 +110,7 @@ function Histogram({ histogram }) {
 
 function ControlSection({ title, children, defaultOpen = false }) {
     return (
-        <details className="editor-control-section" open={defaultOpen}>
+        <details className="editor-control-section linen-disclosure" open={defaultOpen}>
             <summary>{title}</summary>
             <div className="editor-control-body">{children}</div>
         </details>
@@ -1045,7 +1048,10 @@ export default function Editor() {
     return (
         <div className="editor-page">
             <header className="editor-heading">
-                <h1>Photo Editor</h1>
+                <div>
+                    <Link to="/apps" state={{ restoreScroll: '/apps' }} className="explore-back">← All apps</Link>
+                    <h1 data-route-title-alias="Web Editor">Photo Editor</h1>
+                </div>
                 <p>Edit standard photos and camera RAW files entirely on your device. Photos are not uploaded. A recovery copy and your edits are saved in this browser; clear them with Close Photo or in <a href="/privacy" className="underline underline-offset-4">Privacy</a>.</p>
             </header>
 
@@ -1202,7 +1208,7 @@ export default function Editor() {
 
                         <ControlSection title="Color mixer">
                             {COLOR_CHANNELS.map((channel) => (
-                                <details key={channel} className="editor-subsection">
+                                <details key={channel} className="editor-subsection linen-disclosure">
                                     <summary>{channel}</summary>
                                     {['hue', 'saturation', 'luminance'].map((property) => (
                                         <RangeControl
