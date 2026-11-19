@@ -312,11 +312,12 @@
 
 .editor-range input[type="range"] {
     min-width: 0;
-    height: 2px;
+    height: 1.75rem;
     padding: 0;
     border: 0;
     accent-color: var(--color-amber-dark);
-    background: var(--color-warm-border);
+    background: transparent;
+    cursor: ew-resize;
 }
 
 .editor-range input[type="number"] {

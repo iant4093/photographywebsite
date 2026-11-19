@@ -223,6 +223,32 @@ try {
         outcomes.push({width,check:'initial module failure and explicit recovery',passed:true})
         await context.close()
     }
+ {
+  const context = await contextFor(1440)
+  try {
+   const page = await context.newPage()
+   await openEditor(page)
+   const slider = page.getByRole('slider', { name: 'Exposure', exact: true })
+   const value = page.getByRole('spinbutton', { name: 'Exposure value', exact: true })
+   await slider.scrollIntoViewIfNeeded()
+   const bounds = await slider.boundingBox()
+   const start = Number(await slider.inputValue())
+   const grabY = bounds.y + bounds.height / 2 - 9
+   await page.mouse.move(bounds.x + bounds.width * 0.5, grabY)
+   await page.locator('html[data-camera-cursor-active][data-camera-cursor-state="drag-x"]').waitFor()
+   await page.mouse.down()
+   await page.mouse.move(bounds.x + bounds.width * 0.8, grabY, { steps: 5 })
+   await page.mouse.up()
+   const adjusted = Number(await slider.inputValue())
+   assert.ok(adjusted > start, 'Dragging above the visible track adjusts the slider')
+   assert.equal(Number(await value.inputValue()), adjusted)
+   await slider.press('ArrowLeft')
+   assert.ok(Number(await slider.inputValue()) < adjusted)
+   await value.hover()
+   await page.locator('html[data-camera-cursor-active]').waitFor({ state: 'detached' })
+   outcomes.push({check:'editor range drag target, keyboard adjustment, and custom cursor',passed:true})
+  } finally { await context.close() }
+ }
  for (const width of [1440,390]) {
   const context=await contextFor(width),a=await context.newPage();await openEditor(a)
   const bytes=await png(a);await a.locator('input[type=file]').setInputFiles({name:'same-photo.png',mimeType:'image/png',buffer:bytes});await a.getByText('Saved locally',{exact:true}).waitFor()

@@ -448,7 +448,7 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
     min-width: 0;
   }
 
-  :is(.linen-photo-lightbox, .linen-video-lightbox) .linen-lightbox-actions button {
+  :is(.linen-photo-lightbox, .linen-video-lightbox) .linen-lightbox-actions :is(button, .linen-lightbox-print) {
     flex: 0 0 auto;
     justify-content: center;
     width: 2.75rem;
@@ -458,11 +458,11 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
     gap: 0.25rem;
   }
 
-  :is(.linen-photo-lightbox, .linen-video-lightbox) .linen-lightbox-actions button:not(.linen-lightbox-before) > span {
+  :is(.linen-photo-lightbox, .linen-video-lightbox) .linen-lightbox-actions :is(button, .linen-lightbox-print):not(.linen-lightbox-before) > span {
     display: none;
   }
 
-  :is(.linen-photo-lightbox, .linen-video-lightbox) .linen-lightbox-actions button svg {
+  :is(.linen-photo-lightbox, .linen-video-lightbox) .linen-lightbox-actions :is(button, .linen-lightbox-print) svg {
     flex: 0 0 auto;
     width: 1.125rem;
     height: 1.125rem;
@@ -581,7 +581,7 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
     gap: 0.4rem;
   }
 
-  .linen-photo-lightbox .linen-lightbox-actions .linen-lightbox-action-buttons button {
+  .linen-photo-lightbox .linen-lightbox-actions .linen-lightbox-action-buttons :is(button, .linen-lightbox-print) {
     flex: 1 0 2.75rem;
     width: auto;
   }

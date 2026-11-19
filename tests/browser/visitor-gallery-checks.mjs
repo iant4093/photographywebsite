@@ -424,6 +424,20 @@ async function viewerCase(width, failModule = false, kind = 'random') {
         await page.getByRole('button', { name: 'Download photo', exact: true }).waitFor()
         const readyBounds = await frame.boundingBox()
         for (const dimension of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(pendingBounds[dimension] - readyBounds[dimension]) <= 2, `Photo ${dimension} shifted on viewer handoff`)
+        if (exerciseActions && width < 500) {
+            const original = page.viewportSize()
+            for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }]) {
+                await page.setViewportSize(viewport)
+                const [print, share, download] = await dialog.evaluate(element => ['print', 'share', 'download'].map(action => {
+                    const rect = element.querySelector(`.linen-lightbox-${action}`).getBoundingClientRect()
+                    return [rect.width, rect.height, rect.top].map(Math.round)
+                }))
+                assert.deepEqual(print, share, 'Print matches the size and alignment of Share')
+                assert.deepEqual(print, download, 'Print matches the size and alignment of Download')
+                assert.ok(print[0] >= 44 && print[1] >= 44, 'Print has a 44px touch target')
+            }
+            await page.setViewportSize(original)
+        }
         for (let step = 0; step < 12; step++) await page.keyboard.press(step % 2 ? 'ArrowLeft' : 'ArrowRight')
         await page.keyboard.press('Tab')
         assert.equal(await dialog.evaluate(node => node.contains(document.activeElement)), true, 'Focus remains in the viewer after the code handoff')

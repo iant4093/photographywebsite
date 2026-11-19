@@ -8,6 +8,7 @@ const SYMBOLS = {
     close: '<path d="m5 5 14 14M19 5 5 19"/>',
     'zoom-in': '<circle cx="10" cy="10" r="7"/><path d="m15 15 7 7M6.5 10h7M10 6.5v7"/>',
     'zoom-out': '<circle cx="10" cy="10" r="7"/><path d="m15 15 7 7M6.5 10h7"/>',
+    'drag-x': '<path d="M2 12h20M6 8l-4 4 4 4M18 8l4 4-4 4M10 8v8m4-8v8"/>',
     'drag-y': '<path d="M12 2v20M8 6l4-4 4 4M8 18l4 4 4-4M8 10h8m-8 4h8"/>',
     'drag-y-held': '<path d="M12 5v14M9 8l3-3 3 3M9 16l3 3 3-3M10 10.5h4m-4 3h4"/>',
     loading: '<circle cx="12" cy="12" r="9"/><path d="m12 3 5 9m3-6-6 9m4 4H8m4 2-5-9m-3 6 6-9M6 5h10"/>',
@@ -16,12 +17,13 @@ const SYMBOLS = {
 // Native controls retain their own pointer without computed-style reads.
 const NATIVE_SELECTOR = [
     '[data-camera-cursor="native"]', '[inert]', ':disabled', '[aria-disabled="true"]',
-    'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])',
+    'input:not([type="checkbox"], [type="radio"], [type="button"], [type="submit"], [type="reset"], [type="range"][data-camera-cursor="drag-x"])',
     'textarea', 'select', '[contenteditable]:not([contenteditable="false"])',
     'audio', 'iframe', 'dialog[open]',
     '[role="slider"]', '[role="spinbutton"]',
 ].join(',')
 const ACTION_SELECTOR = 'a[href], button, summary, label, [role="button"], [role="link"], input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"]'
+const DRAG_SELECTOR = '[data-camera-cursor="drag-x"], [data-camera-cursor="drag-y"]'
 const TEXT_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, code, dt, dd'
 
 function measureText(element) {
@@ -199,7 +201,7 @@ export function installCameraCursor() {
         if (event.button !== 0) return
         move(event)
         pressed = true
-        dragTarget = event.target instanceof Element ? event.target.closest('[data-camera-cursor="drag-y"]') : null
+        dragTarget = event.target instanceof Element ? event.target.closest(DRAG_SELECTOR) : null
         schedule()
     }, { passive: true })
     listen(document, 'pointerup', release, { passive: true })

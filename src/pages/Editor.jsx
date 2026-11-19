@@ -70,6 +70,7 @@ function RangeControl({ label, value, min, max, step, onChange, onLiveChange, on
             <input
                 aria-label={label}
                 type="range"
+                data-camera-cursor="drag-x"
                 min={min}
                 max={max}
                 step={step}
