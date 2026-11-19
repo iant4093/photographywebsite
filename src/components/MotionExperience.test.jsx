@@ -573,6 +573,27 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
   })
 
+  it('updates the mobile scroll rail without scanning card offsets when only the toolbar height changes', () => {
+    window.matchMedia = vi.fn(query => ({ matches: query === '(pointer: coarse)' }))
+    const { container } = renderExperience()
+    const viewportProbe = document.body.lastElementChild
+    Object.defineProperty(viewportProbe, 'offsetHeight', { configurable: true, value: 1000 })
+    const readTop = vi.fn(() => 600)
+    Object.defineProperty(container.querySelector('.album-card'), 'offsetTop', { configurable: true, get: readTop })
+    flushFrames()
+    readTop.mockClear()
+    window.scrollY = 500
+    window.innerHeight = 750
+    fireEvent.resize(window)
+    flushFrames()
+    expect(screen.getByRole('scrollbar')).toHaveAttribute('aria-valuenow', '40')
+    expect(readTop).not.toHaveBeenCalled()
+    Object.defineProperty(viewportProbe, 'offsetHeight', { configurable: true, value: 500 })
+    fireEvent.resize(window)
+    flushFrames()
+    expect(readTop).toHaveBeenCalledOnce()
+  })
+
   it('hands poses to scroll-driven animations where the browser supports scroll timelines', () => {
     vi.stubGlobal('CSS', { supports: property => ['animation-timeline', 'animation-range'].includes(property) })
     // jsdom has no layout; report the large-viewport probe as a 1000px viewport.

@@ -18,6 +18,7 @@ import {
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { reuseOriginalPreviews } from '../utils/originalPreviewReuse'
 import { pollZipJob } from '../utils/zipDownload'
+import AlbumHeader from '../components/AlbumHeader'
 import AlbumStats from '../components/AlbumStats'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { albumPath } from '../utils/albumRoutes'
@@ -269,7 +270,7 @@ function UserDashboard() {
                 {/* Albums grid or selected album view */}
                 {selectedAlbum ? (
                     /* Album detail view */
-                    <div data-inline-album className="linen-gallery-page linen-gallery-page-embedded animate-fade-in">
+                    <div data-inline-album className="linen-album-page linen-gallery-page linen-gallery-page-embedded animate-fade-in">
                         <button
                             data-inline-album-back
                             onClick={() => {
@@ -289,32 +290,37 @@ function UserDashboard() {
                             Back to Albums
                         </button>
 
-                        <div className="linen-gallery-header flex flex-col sm:flex-row gap-6 items-start justify-between mb-8 pb-6 border-b border-warm-border">
-                            <div>
+                        <AlbumHeader
+                            className="flex flex-col sm:flex-row gap-6 items-start justify-between mb-8 pb-6 border-b border-warm-border"
+                            title={
                                 <h2 className="font-serif text-3xl font-semibold text-charcoal">{selectedAlbum.title}</h2>
+                            }
+                            details={<>
                                 {selectedAlbum.description && <p className="mt-2 text-warm-gray whitespace-pre-wrap">{selectedAlbum.description}</p>}
                                 {!loadingImages && <AlbumStats images={images} />}
-                            </div>
-                            <button
-                                onClick={downloadAll}
-                                disabled={downloading || !images.length}
-                                className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber to-amber-dark text-white font-medium hover:from-amber-dark hover:to-amber-dark transition-all shadow-warm hover:shadow-warm-lg disabled:opacity-50 cursor-pointer"
-                            >
-                                {downloading ? (
-                                    <>
-                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        {zipStatus === 'rate_limited' ? 'Waiting…' : 'Preparing…'}
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                        </svg>
-                                        Download All
-                                    </>
-                                )}
-                            </button>
-                        </div>
+                            </>}
+                            actions={
+                                <button
+                                    onClick={downloadAll}
+                                    disabled={downloading || !images.length}
+                                    className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber to-amber-dark text-white font-medium hover:from-amber-dark hover:to-amber-dark transition-all shadow-warm hover:shadow-warm-lg disabled:opacity-50 cursor-pointer"
+                                >
+                                    {downloading ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            {zipStatus === 'rate_limited' ? 'Waiting…' : 'Preparing…'}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                            Download All
+                                        </>
+                                    )}
+                                </button>
+                            }
+                        />
 
                         {(mediaError || zipError) && (
                             <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

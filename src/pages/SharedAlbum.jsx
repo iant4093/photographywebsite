@@ -19,6 +19,7 @@ import {
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import AlbumQrCode from '../components/AlbumQrCode'
+import AlbumHeader from '../components/AlbumHeader'
 import AlbumShareButton from '../components/AlbumShareButton'
 import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
@@ -309,15 +310,19 @@ export default function SharedAlbum({ theme = 'light' }) {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="linen-gallery-page max-w-7xl mx-auto px-6 py-12 pt-[100px]"
+            className="linen-album-page linen-gallery-page max-w-7xl mx-auto px-6 py-12 pt-[100px]"
         >
             <div className="animate-fade-in">
                 {/* Album header */}
-                <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
-                    <div className="min-w-0">
+                <AlbumHeader
+                    className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10"
+                    titleClassName="min-w-0"
+                    title={
                         <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
                             {album.title}
                         </h1>
+                    }
+                    details={<>
                         {album.description && (
                             <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
                                 {album.description}
@@ -331,9 +336,9 @@ export default function SharedAlbum({ theme = 'light' }) {
                             })}
                         </p>
                         {album.type !== 'video' && <AlbumStats images={images} />}
-                    </div>
-
-                    <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                    </>}
+                    actions={
+                        <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
                             <AlbumShareButton albumTitle={album.title} />
                             <AlbumQrCode
                                 albumTitle={album.title}
@@ -361,8 +366,9 @@ export default function SharedAlbum({ theme = 'light' }) {
                                     )}
                                 </button>
                             )}
-                    </div>
-                </div>
+                        </div>
+                    }
+                />
 
                 {zipError && (
                     <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

@@ -835,6 +835,32 @@ async function exploreHandoffCase(width) {
     } finally { releaseInitialResults?.(); releaseThumbnail?.(); await context.close() }
 }
 
+async function mobileAlbumHeaderCase() {
+    const { context, page } = await openCase({ width: 390 })
+    try {
+        await page.setViewportSize({ width: 390, height: 635 })
+        const album = fixture(1).items[0]
+        for (const route of ['album', 'video']) {
+            await page.goto(origin + '/' + route + '/' + album.albumId)
+            await page.getByRole('heading', { name: album.title, exact: true }).waitFor()
+            const details = page.locator('details.linen-album-details')
+            assert.equal(await details.evaluate(element => element.open), false)
+            const firstMedia = page.locator('[data-lightbox-grid] [data-lightbox-item]').first()
+            await firstMedia.locator('img').evaluate(image => image.decode())
+            assert.ok(await firstMedia.evaluate(element => element.getBoundingClientRect().bottom <= innerHeight),
+                'The first media card fits in the initial small phone viewport')
+            const share = page.getByRole('button', { name: 'Share Album' })
+            assert.equal(await share.count(), 0)
+            await details.locator('summary').click()
+            await share.waitFor({ state: 'visible' })
+            await page.getByRole('button', { name: 'Download All', exact: true }).waitFor({ state: 'visible' })
+            await details.locator('summary').click()
+            await share.waitFor({ state: 'hidden' })
+        }
+        outcomes.push({ name: 'mobile-album-header', width: 390 })
+    } finally { await context.close() }
+}
+
 async function qrMotionCase(width) {
     const { context, page, cdp } = await openCase({ width })
     let releaseAsset
@@ -843,6 +869,7 @@ async function qrMotionCase(width) {
         const hold = new Promise(resolve => { releaseAsset = resolve })
         await page.route('**/album-qr.png', async route => { await hold; await route.fallback() })
         await page.goto(origin + '/album/' + fixture(1).items[0].albumId)
+        if (width < 768) await page.getByText('Album details', { exact: true }).click()
         const trigger = page.locator('button[aria-label^="Show QR code"]')
         const dialog = page.locator('.linen-qr-lightbox')
         const card = dialog.locator('[data-lightbox-panel]')
@@ -1003,15 +1030,21 @@ async function routeCardMotionCase(width) {
         await page.waitForURL('**/album/**')
         await assertLiveTitleHandoff(page, 'enter')
         await entering.waitFor({ state: 'detached' })
-        await page.evaluate(() => {
+        await page.evaluate(mobile => {
             const main = document.querySelector('main')
             const observer = new MutationObserver(() => {
                 if (location.pathname !== '/' || !main.hasAttribute('data-route-page-staged')) return
                 observer.disconnect()
                 window.dispatchEvent(new WheelEvent('wheel', { deltaX: -120, deltaY: 3 }))
+                if (mobile) {
+                    const move = new Event('touchmove', { bubbles: true })
+                    Object.defineProperty(move, 'touches', { value: [{ identifier: 1, clientX: 160, clientY: 400 }] })
+                    main.dispatchEvent(move)
+                    window.dispatchEvent(new Event('resize'))
+                }
             })
             observer.observe(main, { attributes: true, attributeFilter: ['data-route-page-staged'] })
-        })
+        }, width < 500)
         await observeLiveTitleHandoff(page, 'return', navbarBottom)
         await page.goBack()
         await returning.waitFor({ state: 'attached' })
@@ -1811,6 +1844,7 @@ try {
         await routeCardEdgeOnlyCase(width)
         await routeCardEdgeOnlyCase(width, true)
         await floatingEdgeCase(width)
+        if (width < 500) await mobileAlbumHeaderCase()
         await qrMotionCase(width)
         await exploreHandoffCase(width)
         await videoLightboxFrameCase(width)

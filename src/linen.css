@@ -97,6 +97,13 @@
   backdrop-filter: blur(12px);
 }
 
+@media (pointer: coarse) {
+  .linen-site :is(.linen-nav, .linen-menu) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 .linen-site .linen-nav-inner {
   height: 100%;
   max-width: max(104rem, 90vw);

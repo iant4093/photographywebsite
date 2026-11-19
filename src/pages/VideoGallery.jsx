@@ -8,6 +8,7 @@ import VideoLightbox from '../components/VideoLightbox'
 import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import { takeVideoNavigation } from '../utils/lightboxNavigation'
 import AlbumQrCode from '../components/AlbumQrCode'
+import AlbumHeader from '../components/AlbumHeader'
 import AlbumShareButton from '../components/AlbumShareButton'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import {
@@ -248,7 +249,7 @@ function VideoGalleryContent({ albumId }) {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="linen-gallery-page max-w-7xl mx-auto px-6 py-12 pt-[100px]"
+            className="linen-album-page linen-gallery-page max-w-7xl mx-auto px-6 py-12 pt-[100px]"
         >
             {/* Gallery View Header */}
             <button
@@ -261,44 +262,49 @@ function VideoGalleryContent({ albumId }) {
                 Back to Videos
             </button>
 
-            <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
-                <div>
+            <AlbumHeader
+                className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10"
+                title={
                     <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                         {album.title}
                     </h1>
+                }
+                details={<>
                     {album.description && (
                         <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
                             {album.description}
                         </p>
                     )}
-                </div>
-                <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
-                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} />}
-                    <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
-                    {images.length > 0 && (
-                        <button
-                            type="button"
-                            onClick={downloadAll}
-                            disabled={downloadingAll}
-                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark hover:scale-105 active:scale-95 cursor-pointer"
-                        >
-                            {downloadingAll ? (
-                                <>
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
-                                </>
-                            ) : (
-                                <>
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    Download All
-                                </>
-                            )}
-                        </button>
-                    )}
-                </div>
-            </div>
+                </>}
+                actions={
+                    <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                        {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} />}
+                        <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
+                        {images.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={downloadAll}
+                                disabled={downloadingAll}
+                                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark hover:scale-105 active:scale-95 cursor-pointer"
+                            >
+                                {downloadingAll ? (
+                                    <>
+                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        Download All
+                                    </>
+                                )}
+                            </button>
+                        )}
+                    </div>
+                }
+            />
 
             {(mediaError || zipError) && (
                 <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

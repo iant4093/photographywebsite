@@ -8,6 +8,7 @@ import { useAuth } from '../context/auth'
 import AlbumLoadingSkeleton from '../components/AlbumLoadingSkeleton'
 import PhotoLightbox from '../components/PhotoLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
+import AlbumHeader from '../components/AlbumHeader'
 import AlbumShareButton from '../components/AlbumShareButton'
 import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
@@ -237,8 +238,8 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
 
 
     return (
-        <div aria-busy={loading} className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'min-h-screen pb-16 pt-[88px] md:pt-[104px]'}`}>
-            <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
+        <div aria-busy={loading} className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'linen-album-page min-h-screen pb-16 pt-[88px] md:pt-[104px]'}`}>
+            <div className={`max-w-7xl mx-auto px-6 pt-8 md:pt-12 ${embedded ? '' : 'linen-album-content'}`}>
                 {/* Back link — uses browser back to preserve scroll position */}
                 {onBack && <button
                     onClick={onBack}
@@ -264,11 +265,16 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                 {!loading && album && (
                     <div>
                         {/* Album header with slide-up animation */}
-                        <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
-                            <div className="min-w-0 animate-slide-up">
+                        <AlbumHeader
+                            className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in"
+                            titleClassName="min-w-0 animate-slide-up"
+                            compact={!embedded}
+                            title={
                                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                                     {album.title}
                                 </h1>
+                            }
+                            details={<>
                                 {album.description && (
                                     <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
                                         {album.description}
@@ -282,9 +288,9 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                     })}
                                 </p>
                                 <AlbumStats images={images} />
-                            </div>
-
-                            <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                            </>}
+                            actions={
+                                <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
                                     {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} url={embedded ? shareUrlForAlbumPhoto(albumHandle({ ...album, albumId })) : undefined} />}
                                     <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
                                     {images.length > 0 && (
@@ -308,8 +314,9 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                             )}
                                         </button>
                                     )}
-                            </div>
-                        </div>
+                                </div>
+                            }
+                        />
 
                         {(mediaError || zipError) && (
                             <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

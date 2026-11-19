@@ -182,11 +182,14 @@ export default function MotionExperience() {
         let rowTargets = []
         const metadata = new Map()
         let layoutDirty = true
+        let viewportDirty = true
+        let layoutWidth = window.innerWidth
         let motionHeight = 1
         let pageTravel = 0
         let thumbTravel = 0
         const activeTargets = new Set()
         const browserTracksScroll = window.CSS?.supports?.('animation-timeline', 'scroll(root block)') === true
+        const touchViewport = window.matchMedia('(pointer: coarse)').matches
         // Let the browser drive poses where it can: script updates trail the
         // compositor's scroll by a frame, which shows as jitter during momentum.
         const timelineMotion = browserTracksScroll && window.CSS.supports('animation-range', '0px 1px')
@@ -280,6 +283,13 @@ export default function MotionExperience() {
             updateFrame = null
             const viewportHeight = Math.max(window.innerHeight, 1)
             const scrollY = window.scrollY
+            if (layoutDirty || viewportDirty) {
+                const stableHeight = Math.max(viewportProbe.offsetHeight || viewportHeight, 1)
+                const width = window.innerWidth
+                if (width !== layoutWidth || stableHeight !== motionHeight) layoutDirty = true
+                layoutWidth = width
+                motionHeight = stableHeight
+            }
             // Measure untransformed layout only when it changes. Measuring the
             // animated bounds feeds last frame's transform back into this frame,
             // producing jumps on slow direction changes. Never read card layout
@@ -298,7 +308,6 @@ export default function MotionExperience() {
                     Object.assign(info, { top, height: target.offsetHeight })
                     if (info.inScrollRow) rowTargets.push({ target, info })
                 })
-                motionHeight = Math.max(viewportProbe.offsetHeight || viewportHeight, 1)
                 // The page scroll offsets over which each pose runs, matching
                 // the progress formula in updateTarget below.
                 if (timelineMotion) targets.forEach(target => {
@@ -312,6 +321,10 @@ export default function MotionExperience() {
                     maxBottom = Math.max(maxBottom, entry.info.top + entry.info.height)
                     entry.maxBottom = maxBottom
                 })
+                viewportDirty = true
+                layoutDirty = false
+            }
+            if (viewportDirty) {
                 pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
                 // Hidden rails have zero dimensions. Reveal before measuring;
                 // this only runs when content or viewport dimensions change.
@@ -319,7 +332,7 @@ export default function MotionExperience() {
                     progressRail.hidden = pageTravel <= 1
                     thumbTravel = Math.max(progressRail.clientHeight - progressRail.firstElementChild.offsetHeight, 0)
                 }
-                layoutDirty = false
+                viewportDirty = false
             }
             const pageProgress = clamp(scrollY / Math.max(pageTravel, 1), 0, 1)
 
@@ -387,18 +400,26 @@ export default function MotionExperience() {
             layoutDirty = true
             requestUpdate()
         }
+        const refreshViewport = () => {
+            viewportDirty = true
+            requestUpdate()
+        }
+        const onResize = touchViewport ? refreshViewport : refreshLayout
         const onVisibilityChange = () => {
             if (document.hidden && updateFrame !== null) {
                 window.cancelAnimationFrame(updateFrame)
                 updateFrame = null
             } else refreshLayout()
         }
-        const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refreshLayout)
+        const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(entries => {
+            if (!entries || entries.some(entry => entry.target === main)) refreshLayout()
+            else refreshViewport()
+        })
         layoutObserver?.observe(main)
         if (progressRail) layoutObserver?.observe(progressRail)
         collectTargets()
         window.addEventListener('scroll', requestUpdate, { passive: true })
-        window.addEventListener('resize', refreshLayout)
+        window.addEventListener('resize', onResize)
         document.addEventListener('visibilitychange', onVisibilityChange)
 
         return () => {
@@ -406,7 +427,7 @@ export default function MotionExperience() {
             visibilityObserver?.disconnect()
             layoutObserver?.disconnect()
             window.removeEventListener('scroll', requestUpdate)
-            window.removeEventListener('resize', refreshLayout)
+            window.removeEventListener('resize', onResize)
             document.removeEventListener('visibilitychange', onVisibilityChange)
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)

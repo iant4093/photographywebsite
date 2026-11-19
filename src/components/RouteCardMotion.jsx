@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
+import { watchTouchScroll } from '../utils/touchScrollIntent'
 import './RouteCardMotion.css'
 
 const reducedMotion = '(prefers-reduced-motion: reduce)'
@@ -607,6 +608,8 @@ export default function RouteCardMotion() {
                 }
             }
             if (interruption) {
+                const touchViewport = window.matchMedia('(pointer: coarse)').matches
+                const viewportWidth = window.innerWidth
                 const cancelMorph = () => {
                     const opacity = Math.max(.68, Number(getComputedStyle(main).opacity))
                     stop()
@@ -616,17 +619,21 @@ export default function RouteCardMotion() {
                 window.addEventListener('wheel', event => {
                     if (Math.abs(event.deltaY) > Math.abs(event.deltaX) && !event.ctrlKey) cancelMorph()
                 }, listener)
-                window.addEventListener('touchmove', cancelMorph, listener)
+                watchTouchScroll(cancelMorph, interruption.signal)
                 window.addEventListener('keydown', event => {
                     if (!event.defaultPrevented && ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)
                         && !event.target?.closest?.('button, input, textarea, select, [contenteditable], [role="combobox"]')) cancelMorph()
                 }, listener)
                 window.addEventListener('scroll', () => {
-                    if (!landingScroll) return
+                    if (!landingScroll || (touchViewport && document.documentElement.hasAttribute('data-route-scroll-restoring'))) return
                     const { x, y, row, left } = landingScroll
                     if (Math.abs(scrollX - x) > 1 || Math.abs(scrollY - y) > 1 || (row && Math.abs(row.scrollLeft - left) > 1)) cancelMorph()
                 }, { ...listener, capture: true })
-                window.addEventListener('resize', cancelMorph, listener)
+                window.addEventListener('resize', () => {
+                    // Mobile browser chrome can change the height as Back
+                    // completes without invalidating the card's layout.
+                    if (!touchViewport || window.innerWidth !== viewportWidth) cancelMorph()
+                }, listener)
             }
             const step = () => {
                 const elapsed = performance.now() - started

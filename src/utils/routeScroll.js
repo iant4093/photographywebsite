@@ -1,3 +1,5 @@
+import { watchTouchScroll } from './touchScrollIntent'
+
 const positions = new Map()
 const STORAGE_KEY = 'ian:route-scroll:v1'
 const MAX_ENTRIES = 100
@@ -131,17 +133,23 @@ export function watchScrollPosition({ key, historyKey, historyTraversal, route, 
     const save = () => {
         if (restoring || locked() || !ownsEntry()) return
         if (pending) {
-            if (target && Math.abs(window.scrollY - target.top) > 1) schedule()
+            if (target && (Math.abs(window.scrollY - target.top) > 1 || Math.abs(window.scrollX - (target.left || 0)) > 1)) schedule()
             return
         }
         current = offset()
         remember()
     }
     const saveContainer = event => {
-        if (pending || locked() || !ownsEntry()) return
+        if (locked() || !ownsEntry()) return
         const path = containerPath(event.target)
         if (path === null) return
-        containers = { ...containers, [path]: { top: event.target.scrollTop, left: event.target.scrollLeft } }
+        const { scrollTop: top, scrollLeft: left } = event.target
+        if (pending) {
+            const position = containers[path]
+            if (position && (Math.abs(top - position.top) > 1 || Math.abs(left - position.left) > 1)) schedule()
+            return
+        }
+        containers = { ...containers, [path]: { top, left } }
         remember()
     }
     const saveClick = event => {
@@ -167,7 +175,7 @@ export function watchScrollPosition({ key, historyKey, historyTraversal, route, 
     window.addEventListener('scroll', save, { passive: true })
     window.addEventListener('pagehide', pagehide)
     window.addEventListener('wheel', interrupt, { passive: true })
-    window.addEventListener('touchmove', interrupt, { passive: true })
+    const stopWatchingTouch = watchTouchScroll(interrupt)
     window.addEventListener('keydown', interrupt)
     return () => {
         disposed = true
@@ -182,7 +190,7 @@ export function watchScrollPosition({ key, historyKey, historyTraversal, route, 
         window.removeEventListener('scroll', save)
         window.removeEventListener('pagehide', pagehide)
         window.removeEventListener('wheel', interrupt)
-        window.removeEventListener('touchmove', interrupt)
+        stopWatchingTouch()
         window.removeEventListener('keydown', interrupt)
     }
 }

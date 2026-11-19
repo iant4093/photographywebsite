@@ -1,0 +1,66 @@
+@media (max-width: 767.98px) {
+    .linen-album-content {
+        padding-top: 0.75rem;
+    }
+
+    .linen-site .linen-album-page .linen-gallery-back {
+        margin-bottom: 0.8rem;
+    }
+
+    .linen-site .linen-gallery-header--compact {
+        margin-bottom: 1rem;
+        padding-bottom: 0.25rem;
+        border-bottom: 1px solid var(--color-warm-border);
+    }
+
+    .linen-gallery-header--compact > :is(h1, h2) {
+        margin: 0;
+        font-size: clamp(1.75rem, 8vw, 2.25rem);
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+    }
+
+    .linen-album-details > summary {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        min-height: 44px;
+        width: fit-content;
+        color: var(--color-warm-gray);
+        font-size: 0.875rem;
+        list-style: none;
+        cursor: pointer;
+    }
+
+    .linen-album-details > summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .linen-album-details > summary svg {
+        color: var(--color-amber-dark);
+        transition: transform 220ms ease;
+    }
+
+    .linen-album-details[open] > summary svg {
+        transform: rotate(180deg);
+    }
+
+    .linen-album-details-content {
+        display: grid;
+        gap: 0.875rem;
+        padding-bottom: 0.75rem;
+    }
+
+    .linen-album-details-content > button {
+        justify-content: center;
+    }
+
+    .linen-album-page .linen-photo-section-heading {
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.5rem;
+    }
+
+    .linen-album-page .linen-photo-section-heading h2 {
+        font-size: 1.25rem;
+    }
+}

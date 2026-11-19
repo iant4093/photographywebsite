@@ -7,7 +7,8 @@ function apply({ card, moving, clientX, clientY }) {
     else runtime.reset(card)
 }
 
-export function handlePointerTilt({ currentTarget: card, type, clientX, clientY }) {
+export function handlePointerTilt({ currentTarget: card, type, pointerType, clientX, clientY }) {
+    if (pointerType === 'touch') return
     const input = { card, moving: type === 'pointermove', clientX, clientY }
     if (runtime) {
         apply(input)

@@ -84,18 +84,32 @@ describe('route scroll restoration', () => {
         }
     })
 
-    it('reapplies the saved offset if browser Back scrolls again during restoration', () => {
+    it('restores again after browser Back swipe input and yields to a new vertical gesture', () => {
+        const touch = (type, clientX, clientY) => {
+            const event = new Event(type, { bubbles: true })
+            Object.defineProperty(event, 'touches', { value: [{ identifier: 1, clientX, clientY }] })
+            document.querySelector('main').dispatchEvent(event)
+        }
         const leave = start({})
         scroll(1600)
+        touch('touchstart', 12, 350)
         leave()
         scroll(0)
         start({ restore: true })
         frame()
         expect(window.scrollY).toBe(1600)
-        window.dispatchEvent(new Event('touchstart'))
+        touch('touchmove', 130, 360)
+        touch('touchstart', 12, 350)
+        touch('touchmove', 160, 370)
         scroll(0)
         frame()
         expect(window.scrollY).toBe(1600)
+        touch('touchstart', 160, 350)
+        touch('touchmove', 162, 315)
+        scroll(1635)
+        frame()
+        expect(window.scrollY).toBe(1635)
+        expect(document.documentElement.hasAttribute('data-route-scroll-restoring')).toBe(false)
     })
 
     it('ignores horizontal swipe momentum and restores again after a late browser scroll', () => {

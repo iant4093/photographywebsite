@@ -10,7 +10,7 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
     const id = useId()
     return <div className="space-y-12">
         {sections.map((section, sectionIndex) => <section key={section.key} aria-labelledby={section.title ? `${id}-${section.key}` : undefined}>
-            {section.title && <div className="mb-6 flex items-center gap-4 border-b border-warm-border pb-4">
+            {section.title && <div className="linen-photo-section-heading mb-6 flex items-center gap-4 border-b border-warm-border pb-4">
                 <h2 id={`${id}-${section.key}`} className="font-serif text-2xl text-charcoal">{section.title}</h2>
                 <span className="text-sm text-warm-gray">{section.images.length} photos</span>
             </div>}
