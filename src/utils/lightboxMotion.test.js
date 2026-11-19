@@ -109,6 +109,22 @@ describe('lightbox motion lifecycle', () => {
         expect(config.onOpened).toHaveBeenCalledOnce()
     })
 
+    it('keeps the mobile QR backdrop on a separate opacity layer during a reversed entrance', async () => {
+        vi.mocked(window.matchMedia).mockImplementation(query => ({ matches: query === '(pointer: coarse)' }))
+        const { dialog, open, close } = fixture('qr', '<section data-lightbox-panel style="opacity: 1"><img data-lightbox-qr /></section>')
+        open()
+        const opening = dialog.firstElementChild
+        expect(opening).toHaveClass('lightbox-motion-backdrop')
+        expect(animate(opening, 'opacity').frames).toEqual([{ opacity: 0 }, { opacity: 1 }])
+        opening.style.opacity = '.7'
+        const done = close()
+        const returning = dialog.firstElementChild
+        expect(animate(returning, 'opacity').frames).toEqual([{ opacity: .7 }, { opacity: 0 }])
+        expect(animate(dialog, 'backgroundColor')).toBeUndefined()
+        await vi.advanceTimersByTimeAsync(600)
+        expect(done).toHaveBeenCalledOnce()
+    })
+
     it.each(['top', 'bottom'])('opens and returns to the full photo crop across the %s edge', async edge => {
         const top = edge === 'top' ? -35 : window.innerHeight - 50
         const { open, close, trigger } = photo({ bounds: [40, top, 160, 120] })

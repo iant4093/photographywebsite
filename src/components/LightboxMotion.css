@@ -7,6 +7,18 @@
     to { background-color: rgb(23 22 19 / 52%); }
 }
 
+.linen-lightbox[data-lightbox-backdrop] {
+    isolation: isolate;
+    background-color: transparent !important;
+}
+
+.lightbox-motion-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+}
+
 .linen-lightbox:is([data-lightbox-awaiting], [data-lightbox-travelling="photo"]) .linen-lightbox-photo-frame {
     visibility: hidden;
     transition: none;

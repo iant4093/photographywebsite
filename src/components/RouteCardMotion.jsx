@@ -9,6 +9,7 @@ const mainPage = () => document.getElementById('main-content')
 const navbar = () => document.querySelector('.linen-site > .linen-nav')
 const pathOf = location => location.pathname + location.search
 const motionAllowed = () => typeof document.body.animate === 'function' && !window.matchMedia(reducedMotion).matches
+const touchMotion = () => window.matchMedia('(pointer: coarse)').matches
 const cardPath = card => card.dataset.routeTarget || card.pathname + card.search
 const easing = 'cubic-bezier(.23,.65,.27,1)'
 const clippedEasing = 'cubic-bezier(.38,.06,.24,1)'
@@ -126,11 +127,14 @@ function headingPose(heading) {
     return frame ? { frame, title: titleGeometry(heading), element: heading } : null
 }
 
-function capture(card, location) {
-    const wall = card.closest('.floating-print-wall')
-    const phases = wall && [...wall.querySelectorAll(floatingTracks)]
+function floatingPhases(wall) {
+    return wall && [...wall.querySelectorAll(floatingTracks)]
         .map(track => track.getAnimations()[0]?.effect?.getComputedTiming().progress)
-    const current = readTitleStyle(cardPose(card))
+}
+
+function capture(card, location) {
+    const phases = floatingPhases(card.closest('.floating-print-wall'))
+    const current = touchMotion() ? null : readTitleStyle(cardPose(card))
     const pose = current && { frame: current.frame, clipped: current.clipped, clip: current.clip, edge: current.edge,
         inlineBounds: current.inlineBounds, title: current.title }
     return { from: location, marker: card.dataset.routeCard, path: cardPath(card), pose, phases,
@@ -507,7 +511,31 @@ function revealPage(main, { returning, stage, landing, onFinish, fromOpacity = 0
     return release
 }
 
-function fadeRoute({ returning, onFinish, timing, phases }) {
+function revealTouchPage(main, returning, onFinish) {
+    const veil = document.createElement('div')
+    veil.className = 'route-page-touch-fade'
+    veil.setAttribute('aria-hidden', 'true')
+    main.after(veil)
+    const timing = { duration: 320, easing: 'ease-in-out', fill: 'both' }
+    const motion = veil.animate([{ opacity: .92 }, { opacity: 0 }], timing)
+    const heading = returning ? null : main.querySelector('.linen-gallery-header h1')
+    const rise = heading?.animate([{ transform: 'translateY(10px)' }, { transform: 'translateY(0px)' }], timing)
+    main.dataset.routePageMotion = returning ? 'return' : 'enter'
+    let finished = false
+    const stop = () => {
+        if (finished) return
+        finished = true
+        veil.remove()
+        motion.cancel()
+        rise?.cancel()
+        delete main.dataset.routePageMotion
+        onFinish()
+    }
+    motion.finished.then(stop, () => {})
+    return stop
+}
+
+function fadeRoute({ returning, onFinish, timing, phases, destination }) {
     const main = mainPage()
     if (!main || !motionAllowed()) return
     let frame
@@ -521,6 +549,11 @@ function fadeRoute({ returning, onFinish, timing, phases }) {
     const prepare = () => {
         const page = main.firstElementChild
         page?.setAttribute('data-route-faded', returning ? 'return' : '')
+        if (touchMotion()) {
+            if (phases) resumeTracks = holdFloatingTracks(phases)
+            release = revealTouchPage(main, returning, finish)
+            return
+        }
         main.dataset.routePagePreparing = ''
         const started = performance.now()
         const fade = () => {
@@ -538,14 +571,23 @@ function fadeRoute({ returning, onFinish, timing, phases }) {
         // the destination text becomes visible.
         frame = requestAnimationFrame(() => { frame = requestAnimationFrame(fade) })
     }
+    // Suspense can keep the old page painted after the URL changes. Start a
+    // phone fade only after the destination has committed and left its loader.
+    const ready = () => {
+        if (main.querySelector('[data-route-loading]')) return false
+        const path = destination?.()
+        if (!path) return true
+        if (main.querySelector('[data-route-content]')?.dataset.routeContent !== path) return false
+        return !/^\/(album|video)\//.test(path) || main.querySelector('.linen-gallery-header h1, [data-route-gallery-error]')
+    }
     let observer
-    if (main.querySelector('[data-route-loading]')) {
+    if (!ready()) {
         observer = new MutationObserver(() => {
-            if (main.querySelector('[data-route-loading]')) return
+            if (!ready()) return
             observer.disconnect()
             if (motionAllowed()) prepare()
         })
-        observer.observe(main, { childList: true, subtree: true })
+        observer.observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-route-content', 'data-route-loading'] })
     } else prepare()
     return () => {
         observer?.disconnect()
@@ -576,8 +618,12 @@ export default function RouteCardMotion() {
             const releaseNavbar = restoreGallery ? holdNavbarForReturn(record.navbarVisible) : undefined
             const fastReturn = restoreGallery || (returning && moduleCardMarkers.has(record?.marker))
             const timing = fastReturn ? returnReveal : routeReveal
-            if (!canStage && !inline) {
-                runtime.stop = fadeRoute({ returning, onFinish: releaseNavbar, timing, phases: returning ? record?.phases : undefined })
+            const touch = touchMotion()
+            if (touch || (!canStage && !inline)) {
+                runtime.stop = fadeRoute({
+                    returning, onFinish: releaseNavbar, timing, phases: returning ? record?.phases : undefined,
+                    destination: touch && !inline ? () => runtime.location.pathname : undefined,
+                })
                 return
             }
             const stage = canStage && !opensPlayer ? stageCard(main, from, returning, record) : null
@@ -697,7 +743,7 @@ export default function RouteCardMotion() {
             runtime.pending = { record, returning, path, time: performance.now() }
         }
         const rememberHeading = (record) => {
-            if (!record) return
+            if (!record || touchMotion()) return
             const heading = readTitleStyle(headingPose(mainPage()?.querySelector('[data-inline-album] h2, h1')))
             record.heading = heading ? { frame: heading.frame, title: heading.title } : undefined
         }
@@ -708,6 +754,10 @@ export default function RouteCardMotion() {
             const next = runtime.history.get(key)
             const main = mainPage()
             if (main && next?.marker === 'floating' && next.from.key === runtime.location.key) {
+                if (touchMotion()) {
+                    next.phases = floatingPhases(main.querySelector('.floating-print-wall'))
+                    return
+                }
                 const card = returnedCard(main, next)?.card
                 const current = card && capture(card, runtime.location)
                 if (current?.pose) runtime.history.set(key, current)
@@ -777,7 +827,7 @@ export default function RouteCardMotion() {
             runtime.history.delete(prior.key)
         } else if (location.pathname !== prior.pathname) {
             runtime.stop?.()
-            runtime.stop = fadeRoute({ returning: action === 'POP' })
+            runtime.stop = fadeRoute({ returning: action === 'POP', destination: touchMotion() ? () => runtime.location.pathname : undefined })
         }
         if (location.pathname !== prior.pathname) runtime.inline = undefined
         if (runtime.history.size > 32) runtime.history.delete(runtime.history.keys().next().value)

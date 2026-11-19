@@ -176,12 +176,13 @@ export default function MotionExperience() {
         const progressRail = progressRef.current
         if (!main) return undefined
 
+        const touchViewport = window.matchMedia('(pointer: coarse)').matches
         let updateFrame = null
         let collectFrame = null
         let targets = []
         let rowTargets = []
         const metadata = new Map()
-        let layoutDirty = true
+        let layoutDirty = !touchViewport
         let viewportDirty = true
         let layoutWidth = window.innerWidth
         let motionHeight = 1
@@ -189,7 +190,6 @@ export default function MotionExperience() {
         let thumbTravel = 0
         const activeTargets = new Set()
         const browserTracksScroll = window.CSS?.supports?.('animation-timeline', 'scroll(root block)') === true
-        const touchViewport = window.matchMedia('(pointer: coarse)').matches
         // Let the browser drive poses where it can: script updates trail the
         // compositor's scroll by a frame, which shows as jitter during momentum.
         const timelineMotion = browserTracksScroll && window.CSS.supports('animation-range', '0px 1px')
@@ -199,16 +199,18 @@ export default function MotionExperience() {
         // iOS Safari resizes the viewport as its toolbars collapse and expand
         // mid-scroll. Poses follow the large viewport, which stays fixed, so
         // the toolbar cannot shift every card at once.
-        const viewportProbe = document.createElement('div')
-        viewportProbe.setAttribute('aria-hidden', 'true')
-        viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none'
-        document.body.append(viewportProbe)
+        const viewportProbe = touchViewport ? null : document.createElement('div')
+        if (viewportProbe) {
+            viewportProbe.setAttribute('aria-hidden', 'true')
+            viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none'
+            document.body.append(viewportProbe)
+        }
 
         const requestUpdate = () => {
             if (!document.hidden && updateFrame === null) updateFrame = window.requestAnimationFrame(update)
         }
 
-        const visibilityObserver = typeof IntersectionObserver === 'undefined'
+        const visibilityObserver = touchViewport || typeof IntersectionObserver === 'undefined'
             ? null
             : new IntersectionObserver((entries) => {
                 entries.forEach((entry) => {
@@ -283,7 +285,7 @@ export default function MotionExperience() {
             updateFrame = null
             const viewportHeight = Math.max(window.innerHeight, 1)
             const scrollY = window.scrollY
-            if (layoutDirty || viewportDirty) {
+            if (viewportProbe && (layoutDirty || viewportDirty)) {
                 const stableHeight = Math.max(viewportProbe.offsetHeight || viewportHeight, 1)
                 const width = window.innerWidth
                 if (width !== layoutWidth || stableHeight !== motionHeight) layoutDirty = true
@@ -331,13 +333,13 @@ export default function MotionExperience() {
                 if (progressRail) {
                     progressRail.hidden = pageTravel <= 1
                     thumbTravel = Math.max(progressRail.clientHeight - progressRail.firstElementChild.offsetHeight, 0)
+                    setMotionStyle(progressRail, 'progress-travel', thumbTravel, 'px')
                 }
                 viewportDirty = false
             }
             const pageProgress = clamp(scrollY / Math.max(pageTravel, 1), 0, 1)
 
             if (progressRail) {
-                setMotionStyle(progressRail, 'progress-travel', thumbTravel, 'px')
                 if (!dragRef.current) {
                     const progressValue = String(Math.round(pageProgress * 100))
                     if (progressRail.getAttribute('aria-valuenow') !== progressValue) progressRail.setAttribute('aria-valuenow', progressValue)
@@ -349,6 +351,8 @@ export default function MotionExperience() {
                     )
                 }
             }
+
+            if (touchViewport || timelineMotion) return
 
             const updateTarget = (target, info) => {
                 const measuredHeight = Math.min(Math.max(info.height, 1), motionHeight)
@@ -368,7 +372,6 @@ export default function MotionExperience() {
                 setMotionStyle(target, 'card-rotation', position * phase * 0.62, 'deg', 3)
                 setMotionStyle(target, 'rotation', position * phase * 0.72 * amplitude, 'deg', 3)
             }
-            if (timelineMotion) return
             activeTargets.forEach(target => {
                 const info = metadata.get(target)
                 if (!info.inScrollRow) updateTarget(target, info)
@@ -390,10 +393,12 @@ export default function MotionExperience() {
             }
         }
 
-        const mutationObserver = new MutationObserver(records => {
+        // Touch scrolling stays native. Keep the film strip while leaving the
+        // gallery cards at rest between taps, including on WebKit's JS fallback.
+        const mutationObserver = touchViewport ? null : new MutationObserver(records => {
             if (changesMotionTargets(records)) requestCollection()
         })
-        mutationObserver.observe(main, { childList: true, subtree: true })
+        mutationObserver?.observe(main, { childList: true, subtree: true })
         // Image swaps inside fixed media frames do not alter the motion target
         // set. Observe actual page-size changes without recollecting every card.
         const refreshLayout = () => {
@@ -409,21 +414,22 @@ export default function MotionExperience() {
             if (document.hidden && updateFrame !== null) {
                 window.cancelAnimationFrame(updateFrame)
                 updateFrame = null
-            } else refreshLayout()
+            } else onResize()
         }
         const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(entries => {
-            if (!entries || entries.some(entry => entry.target === main)) refreshLayout()
+            if (!touchViewport && (!entries || entries.some(entry => entry.target === main))) refreshLayout()
             else refreshViewport()
         })
         layoutObserver?.observe(main)
         if (progressRail) layoutObserver?.observe(progressRail)
-        collectTargets()
+        if (touchViewport) requestUpdate()
+        else collectTargets()
         window.addEventListener('scroll', requestUpdate, { passive: true })
         window.addEventListener('resize', onResize)
         document.addEventListener('visibilitychange', onVisibilityChange)
 
         return () => {
-            mutationObserver.disconnect()
+            mutationObserver?.disconnect()
             visibilityObserver?.disconnect()
             layoutObserver?.disconnect()
             window.removeEventListener('scroll', requestUpdate)
@@ -432,7 +438,7 @@ export default function MotionExperience() {
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)
             targets.forEach(clearMotionStyles)
-            viewportProbe.remove()
+            viewportProbe?.remove()
             root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
             // Preserve the handle position until the next route measures its layout.
         }

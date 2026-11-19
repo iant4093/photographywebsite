@@ -160,6 +160,27 @@ function opacity(element) {
     return element ? Number(getComputedStyle(element).opacity) : undefined
 }
 
+function addBackdrop(dialog, color) {
+    const layer = document.createElement('div')
+    layer.className = 'lightbox-motion-backdrop'
+    layer.setAttribute('aria-hidden', 'true')
+    layer.style.backgroundColor = color
+    dialog.dataset.lightboxBackdrop = ''
+    dialog.prepend(layer)
+    return layer
+}
+
+function removeBackdrop(layer) {
+    if (!layer) return
+    if (layer.parentElement) delete layer.parentElement.dataset.lightboxBackdrop
+    layer.remove()
+}
+
+function backdropPose(dialog, color) {
+    const layer = dialog.querySelector(':scope > .lightbox-motion-backdrop')
+    return layer ? { backdrop: layer.style.backgroundColor, backdropOpacity: opacity(layer) } : { backdrop: color }
+}
+
 function snapshot(dialog) {
     const shell = dialog.querySelector('.lightbox-motion-flight')
     const panel = dialog.querySelector('[data-lightbox-panel]')
@@ -172,7 +193,7 @@ function snapshot(dialog) {
     const dialogStyle = getComputedStyle(dialog)
     return {
         opacity: Number(dialogStyle.opacity),
-        backdrop: dialogStyle.backgroundColor,
+        ...backdropPose(dialog, dialogStyle.backgroundColor),
         controlsOpacity: Number(dialogStyle.getPropertyValue(controlsOpacity) || 1),
         controls: new Map([...dialog.querySelectorAll(`${panelEdges}, .linen-lightbox-close`)].map(element => [element, opacity(element)])),
         panel: opacity(panel),
@@ -188,12 +209,12 @@ function snapshot(dialog) {
 
 function snapshotQr(dialog) {
     const panel = dialog.querySelector('[data-lightbox-panel]')
-    return { backdrop: getComputedStyle(dialog).backgroundColor, panel: opacity(panel),
+    return { ...backdropPose(dialog, getComputedStyle(dialog).backgroundColor), panel: opacity(panel),
         transform: getComputedStyle(panel).transform, image: opacity(panel.querySelector(qrSelector)),
         close: opacity(dialog.querySelector('.linen-lightbox-close')) }
 }
 
-function runQrMotion(dialog, { origin, current, reverse, reduced }) {
+function runQrMotion(dialog, { origin, current, reverse, reduced, touch }) {
     const panel = dialog.querySelector('[data-lightbox-panel]')
     const close = dialog.querySelector('.linen-lightbox-close')
     const qr = panel.querySelector(qrSelector)
@@ -205,9 +226,11 @@ function runQrMotion(dialog, { origin, current, reverse, reduced }) {
     const small = reduced ? 'none' : `translate(${x}px, ${y}px) scale(${from ? .82 : .96})`
     const backdrop = getComputedStyle(dialog).backgroundColor
     const timing = { duration: reduced ? 110 : reverse ? 310 : 330, easing: reverse ? 'ease-in-out' : ease, fill: 'both' }
+    const layer = touch ? addBackdrop(dialog, reverse ? current.backdrop : backdrop) : null
     const animations = [
-        dialog.animate(reverse ? [{ backgroundColor: current.backdrop }, { backgroundColor: clear }]
-            : [{ backgroundColor: clear }, { backgroundColor: backdrop }], timing),
+        layer ? layer.animate([{ opacity: current?.backdropOpacity ?? Number(Boolean(reverse)) }, { opacity: reverse ? 0 : 1 }], timing)
+            : dialog.animate(reverse ? [{ backgroundColor: current.backdrop }, { backgroundColor: clear }]
+                : [{ backgroundColor: clear }, { backgroundColor: backdrop }], timing),
         panel.animate(reverse ? [{ opacity: current.panel, transform: current.transform }, { opacity: 0, transform: small }]
             : [{ opacity: 0, transform: small }, { opacity: 1, transform: 'none' }], timing),
     ]
@@ -225,13 +248,14 @@ function runQrMotion(dialog, { origin, current, reverse, reduced }) {
         done: Promise.allSettled(animations.map(animation => animation.finished)),
         cancel() {
             for (const animation of animations) animation.cancel()
+            removeBackdrop(layer)
             delete dialog.dataset.qrOpening
             delete dialog.dataset.qrClosing
         },
     }
 }
 
-function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, current, reduced }) {
+function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, current, reduced, touch }) {
     const animations = []
     let shell
     let hiddenOrigin
@@ -265,6 +289,11 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
         easing: videoEntrance ? 'ease-in-out' : 'ease-out' }
     const timing = { duration, delay: reverse && !photoButtonClose ? controlsFade : 0, fill: 'both',
         easing: photoButtonClose ? photoButtonCloseEase : reverse && panel && !museum ? reversePanelEase : ease }
+    const backdrop = getComputedStyle(dialog).backgroundColor
+    const fromBackdrop = current?.backdrop ?? backdrop
+    const layer = touch && (travel || (reverse && current?.backdropOpacity !== undefined))
+        ? addBackdrop(dialog, reverse ? fromBackdrop : backdrop) : null
+    if (layer) layer.style.opacity = current?.backdropOpacity ?? (reverse ? 1 : 0)
     function play(element, frames, options) {
         if (!element) return
         const animation = element.animate(frames, { ...timing, ...options })
@@ -274,7 +303,7 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
 
     if (photoDissolve) {
         dialog.dataset.lightboxDissolving = ''
-        const backgroundColor = current?.backdrop ?? getComputedStyle(dialog).backgroundColor
+        const backgroundColor = layer ? clear : fromBackdrop
         const fadeOut = photoButtonClose ? { duration: photoButtonCloseMs, easing: photoButtonCloseEase }
             : { duration: 360, easing: 'cubic-bezier(.42,0,.35,1)' }
         const chromeFade = { duration: 160, easing: 'ease-out' }
@@ -284,7 +313,7 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
         play(closeButton, [{ opacity: current?.controls.get(closeButton) ?? 1 }, { opacity: 0 }], chromeFade)
     } else if (!travel) {
         const initial = current?.opacity ?? 1
-        const backgroundColor = current?.backdrop ?? getComputedStyle(dialog).backgroundColor
+        const backgroundColor = layer ? clear : fromBackdrop
         play(dialog, reverse ? [{ opacity: initial, backgroundColor }, { opacity: 0, backgroundColor }] : [{ opacity: 0 }, { opacity: 1 }])
     } else {
         const thumbnail = photoReturn ? origin.visual?.querySelector('img') : null
@@ -330,20 +359,19 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
             hiddenOrigin.dataset.lightboxMotionSource = ''
         }
 
-        const backdrop = getComputedStyle(dialog).backgroundColor
         dialog.dataset.lightboxTravelling = kind
         let flightTravel
-        const touchPhoto = kind === 'photo' && window.matchMedia?.('(pointer: coarse)').matches
         const thumbnailEntrance = kind === 'photo' && !reverse && origin.kind === 'photo'
-        // A settled viewer starts at its fitted size. Interrupted entrances keep
-        // the positional fallback so an in-flight pose can still reverse in place.
-        if (thumbnailEntrance || (touchPhoto && !current?.flight)) {
+        if (thumbnailEntrance) {
             playPhotoTravel(flight, from, rect, fromShape, toShape, play, reverse, photoReturn ? photoLandingMs : duration)
         } else {
             flightTravel = play(shell, reverse ? [current?.flight ?? toShape, fromShape] : [fromShape, toShape],
                 photoReturn ? { duration: photoLandingMs } : undefined)
         }
-        play(dialog, reverse ? [{ backgroundColor: current?.backdrop ?? backdrop }, { backgroundColor: clear }]
+        // An opacity fade on a static surface keeps the viewport backdrop out
+        // of the paint loop while the image moves on touch devices.
+        if (layer) play(layer, [{ opacity: Number(layer.style.opacity) }, { opacity: reverse ? 0 : 1 }])
+        else play(dialog, reverse ? [{ backgroundColor: fromBackdrop }, { backgroundColor: clear }]
             : [{ backgroundColor: current?.backdrop ?? clear }, { backgroundColor: backdrop }])
 
         if (videoEntrance) {
@@ -411,6 +439,7 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
         cancel() {
             videoHandoff?.cancel()
             for (const animation of animations) animation.cancel()
+            removeBackdrop(layer)
             hiddenOrigin?.removeAttribute('data-lightbox-motion-source')
             shell?.remove()
             target?.classList.remove('lightbox-motion-in-flight')
@@ -427,6 +456,7 @@ export function installLightboxMotion(dialog, config, trigger) {
     if (!initial) return undefined
     const { kind } = initial
     const reduced = prefersReducedLightboxMotion()
+    const touch = window.matchMedia?.('(pointer: coarse)').matches
     const origin = takeLightboxTrigger(initial.originKind ?? kind, initial.key, initial.origin, trigger)
     const animate = kind === 'qr' ? runQrMotion : runMotion
     const readPose = kind === 'qr' ? snapshotQr : snapshot
@@ -457,7 +487,7 @@ export function installLightboxMotion(dialog, config, trigger) {
     }
     const start = (anchor, current) => {
         settle()
-        const next = animate(dialog, { kind, origin: anchor, current, reduced })
+        const next = animate(dialog, { kind, origin: anchor, current, reduced, touch })
         run = next
         next.done.then(() => { if (run === next && !closing) finishEntrance() })
     }
@@ -468,7 +498,7 @@ export function installLightboxMotion(dialog, config, trigger) {
         const current = readPose(dialog)
         settle()
         const anchor = findLightboxReturn(origin, config()?.key)
-        const exit = animate(dialog, { kind, origin: anchor, originKind: initial.originKind ?? origin?.kind, current, reverse: true, reduced })
+        const exit = animate(dialog, { kind, origin: anchor, originKind: initial.originKind ?? origin?.kind, current, reverse: true, reduced, touch })
         run = exit
         exit.done.then(() => { if (run === exit) close() })
     }

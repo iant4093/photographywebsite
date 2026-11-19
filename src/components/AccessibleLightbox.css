@@ -110,6 +110,17 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
   mix-blend-mode: plus-lighter;
 }
 
+@media (pointer: coarse) and (prefers-reduced-motion: no-preference) {
+  .linen-photo-lightbox .linen-lightbox-photo-frame {
+    transition: opacity var(--photo-fade) cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear, transform 300ms ease-out;
+  }
+
+  /* The first photo can arrive after the backdrop has finished fading. */
+  .linen-photo-lightbox .linen-lightbox-media:not(:has(> .is-outgoing)) > .linen-lightbox-photo-frame:not(.is-loaded, .is-hidden) {
+    transform: translateY(10px);
+  }
+}
+
 .linen-lightbox-media > img {
   grid-area: 1 / 1;
   min-width: 0;

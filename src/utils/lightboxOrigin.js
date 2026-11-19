@@ -1,4 +1,4 @@
-import { preloadLightboxMotion } from './lightboxMotionControl'
+import { preloadLightboxMotion, usesTouchMediaFade } from './lightboxMotionControl'
 
 const triggers = new WeakMap()
 const mediaSelector = '[data-lightbox-item]'
@@ -27,7 +27,7 @@ export function fitsViewport(rect) {
 export function rememberLightboxTrigger(element, kind, key, visual = element) {
     if (!element) return null
     element.focus({ preventScroll: true })
-    if (prefersReducedLightboxMotion()) return null
+    if (prefersReducedLightboxMotion() || usesTouchMediaFade(kind)) return null
     const rect = lightboxRect(visual, { allowPartial: kind === 'photo' || kind === 'video' })
     if (!rect && kind !== 'photo') return null
     if (element.animate) void preloadLightboxMotion()

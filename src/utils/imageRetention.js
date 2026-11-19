@@ -38,6 +38,7 @@ export function decodedImageBytes(image) {
 let shared = null
 
 function createRetentionObserver() {
+    const touch = window.matchMedia?.('(pointer: coarse)').matches === true
     const records = new Map()
     const recent = new Map()
     let recentBytes = 0
@@ -81,7 +82,7 @@ function createRetentionObserver() {
                 const record = records.get(element)
                 return !record.viewportKnown || (record.inViewport && priorityLoading.has(element))
             })) return
-            const limit = backgroundLoadLimit()
+            const limit = touch ? Math.min(1, backgroundLoadLimit()) : backgroundLoadLimit()
             for (const element of priorityWaiting) {
                 if (priorityLoading.size >= limit) break
                 startPriorityLoad(element)
@@ -149,10 +150,10 @@ function createRetentionObserver() {
     }
     const observerFor = near => {
         if (!observers.has(near)) observers.set(near, new IntersectionObserver(notify, {
-            rootMargin: near ? '120px 0px' : '800px',
-            // Only the featured strip uses the narrow, queued loading window.
-            // Both policies still share the same decoded-memory/retention cap.
-            scrollMargin: near ? '0px 100px' : '0px 360px',
+            rootMargin: near ? '120px 0px' : touch ? '360px 0px' : '800px',
+            // Touch galleries and the featured strip keep a narrower window.
+            // All policies still share the decoded-memory retention cap.
+            scrollMargin: near ? '0px 100px' : touch ? '0px 160px' : '0px 360px',
             threshold: 0,
         }))
         return observers.get(near)
@@ -167,6 +168,7 @@ function createRetentionObserver() {
 
     return {
         add(element, change, near, { viewportFirst = false, eager = false }) {
+            viewportFirst ||= touch
             const observer = observerFor(near)
             records.set(element, { change, near, observer, viewportFirst, eager,
                 viewportKnown: false, inViewport: false, visible: false, resident: eager, bytes: UNKNOWN_IMAGE_BYTES })

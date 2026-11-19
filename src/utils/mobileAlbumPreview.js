@@ -116,7 +116,9 @@ function createCoordinator() {
 }
 
 export function registerMobileAlbumPreview(element, callbacks) {
-    if (!element) return () => {}
+    // On touch screens an idle card can start decoding a slideshow just as
+    // the visitor taps it. Save that work for the album they choose to open.
+    if (!element || window.matchMedia('(pointer: coarse)').matches) return () => {}
     coordinator ??= createCoordinator()
     const owner = coordinator
     owner.add(element, callbacks)

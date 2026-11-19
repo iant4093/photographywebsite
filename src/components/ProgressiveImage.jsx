@@ -134,7 +134,10 @@ export default function ProgressiveImage({
                     }}
                     // Copy only once the first reveal finishes: this keeps the
                     // initial fade intact and avoids extra work on the load frame.
-                    onAnimationEnd={(event) => captureImageSnapshot(snapshotRef.current, event.currentTarget)}
+                    onAnimationEnd={(event) => {
+                        if (placeholderUrl && window.matchMedia('(pointer: coarse)').matches) return
+                        captureImageSnapshot(snapshotRef.current, event.currentTarget)
+                    }}
                     onError={(event) => {
                         if (effectiveSrcSet) {
                             setFailedResponsiveIdentity(responsiveIdentity)

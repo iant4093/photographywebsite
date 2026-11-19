@@ -231,6 +231,7 @@ function VideoGalleryContent({ albumId }) {
     if (!album) {
         return (
             <motion.div
+                data-route-gallery-error=""
                 variants={pageVariants}
                 initial="initial"
                 animate="animate"

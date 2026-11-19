@@ -79,6 +79,14 @@ describe('shared mobile album preview focus', () => {
         expect(center.start).toHaveBeenCalledOnce()
     })
 
+    it('does not schedule autoplay or observe cards on a coarse pointer', async () => {
+        window.matchMedia('(pointer: coarse)').matches = true
+        const target = card()
+        await settle()
+        expect(target.start).not.toHaveBeenCalled()
+        expect(observers).toHaveLength(0)
+    })
+
     it('does no geometry work during a slow reverse scroll, stops immediately, then waits again', async () => {
         const target = card()
         intersect([[target.element]])

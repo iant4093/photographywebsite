@@ -38,6 +38,21 @@ main[data-route-page-staged]:not([data-route-page-revealing]) .skeleton-shimmer 
     overflow: hidden;
 }
 
+.route-page-touch-fade {
+    position: fixed;
+    inset: 0;
+    z-index: 44;
+    pointer-events: none;
+    background: var(--color-cream);
+}
+
+@media (pointer: coarse) {
+    html[data-lightbox-scroll-lock] .linen-site .is-floating-visible .floating-loop-track,
+    .linen-site main[data-route-page-motion] .is-floating-visible .floating-loop-track {
+        animation-play-state: paused;
+    }
+}
+
 .route-card-outline,
 .route-card-title {
     position: absolute;

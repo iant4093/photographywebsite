@@ -166,6 +166,7 @@ function App() {
                         <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
+                    <span hidden data-route-content={location.pathname} />
                     <InitialLoadGate />
                 </Suspense>
                 </RecoveryBoundary>

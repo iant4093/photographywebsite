@@ -429,7 +429,7 @@ describe('Home complete public catalog', () => {
     expect(catalog.setCatalogSnapshot).not.toHaveBeenCalled()
   })
 
-  it.each([false, true])('animates photo parallax and cleans up (touch/mobile: %s)', async (mobile) => {
+  it.each([false, true])('only runs photo hero parallax on desktop (touch: %s)', async (mobile) => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [{ albumId: '1', title: 'Animated', type: 'photo', category: 'Travel' }], nextCursor: null })
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     window.matchMedia = vi.fn(query => ({ matches: mobile && /pointer: coarse|max-width/.test(query) }))
@@ -451,11 +451,11 @@ describe('Home complete public catalog', () => {
     const { container, unmount } = routed(<Home />)
     fireEvent.scroll(window)
     fireEvent.scroll(window)
-    expect(window.requestAnimationFrame).toHaveBeenCalledOnce()
-    act(() => frameCallback())
+    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(mobile ? 0 : 1)
+    if (!mobile) act(() => frameCallback())
     const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(hero).toHaveClass('home-hero-media', 'parallax-hero')
-    expect(hero.style.transform).toBe('translateY(-24px)')
+    expect(hero.style.transform).toBe(mobile ? '' : 'translateY(-24px)')
     expect(container.querySelector('section.home-hero')).toBeTruthy()
     expect(container.querySelector('.home-hero-overlay')).toBeTruthy()
     const target = container.querySelector('[data-reveal-id="home-photo-header"]')
@@ -466,7 +466,7 @@ describe('Home complete public catalog', () => {
     fireEvent.scroll(window)
     unmount()
     expect(disconnect).toHaveBeenCalled()
-    expect(window.cancelAnimationFrame).toHaveBeenCalledWith(9)
+    if (!mobile) expect(window.cancelAnimationFrame).toHaveBeenCalledWith(9)
   })
 
   it('falls back through the legacy managed hero before using the bundled responsive hero', async () => {
@@ -696,7 +696,7 @@ describe('Videos paginated catalog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('More videos could not be loaded.')
   })
 
-  it.each([false, true])('animates video parallax and cleans up (touch/mobile: %s)', async (mobile) => {
+  it.each([false, true])('only runs video hero parallax on desktop (touch: %s)', async (mobile) => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [{ albumId: 'v', title: 'Animated video', type: 'video', category: 'Film' }], nextCursor: null })
     window.matchMedia = vi.fn(query => ({ matches: mobile && /pointer: coarse|max-width/.test(query) }))
     Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 200 })
@@ -716,16 +716,16 @@ describe('Videos paginated catalog', () => {
     const { container, unmount } = routed(<Videos />)
     fireEvent.scroll(window)
     fireEvent.scroll(window)
-    expect(window.requestAnimationFrame).toHaveBeenCalledOnce()
-    act(() => frameCallback())
-    expect(screen.getByRole('img', { name: 'Cinematography' }).style.transform).toBe('translateY(30px)')
+    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(mobile ? 0 : 1)
+    if (!mobile) act(() => frameCallback())
+    expect(screen.getByRole('img', { name: 'Cinematography' }).style.transform).toBe(mobile ? '' : 'translateY(30px)')
     const target = container.querySelector('[data-reveal-id="video-projects-header"]')
     act(() => callback([{ isIntersecting: false, target }, { isIntersecting: true, target }]))
     expect(target).toHaveClass('is-visible')
     expect(unobserve).toHaveBeenCalledWith(target)
     fireEvent.scroll(window)
     unmount()
-    expect(window.cancelAnimationFrame).toHaveBeenCalledWith(4)
+    if (!mobile) expect(window.cancelAnimationFrame).toHaveBeenCalledWith(4)
   })
 
   it('falls back through the managed video hero before the bundled video image', () => {

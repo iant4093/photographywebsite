@@ -356,6 +356,11 @@ async function viewerCase(width, failModule = false, kind = 'random') {
         await page.getByRole('img', { name: 'Fixture photograph 1', exact: true }).waitFor()
         await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] img')].some(image => image.complete && image.naturalWidth > 0))
         const frame = dialog.locator('.linen-lightbox-photo-frame:not(.is-outgoing):not(.is-hidden)')
+        if (width < 500) {
+            await frame.and(page.locator('.is-loaded')).evaluate(element => Promise.allSettled(
+                element.getAnimations().filter(animation => animation.transitionProperty === 'transform').map(animation => animation.finished),
+            ))
+        }
         const pendingBounds = await frame.boundingBox()
         assert.equal(await page.getByRole('button', { name: 'Close photo viewer', exact: true }).evaluate(node => node === document.activeElement), true)
         await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowLeft')
@@ -449,7 +454,7 @@ async function lightboxStabilityCase(width) {
         if (width >= 500) await tile.hover()
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
         const before = await pose()
-        assert.ok(before.scroll > 0, 'The gallery must be scrolled to exercise its scroll timeline')
+        assert.ok(before.scroll > 0, 'The gallery must be scrolled to exercise scroll restoration')
         if (width < 500 && engine !== 'firefox') await tile.tap()
         else {
             // Use the existing pointer position so the automation does not scroll the transformed tile again.
@@ -859,6 +864,104 @@ async function mobileAlbumHeaderCase() {
         }
         outcomes.push({ name: 'mobile-album-header', width: 390 })
     } finally { await context.close() }
+}
+
+async function mobileMediaMotionCase() {
+    const { context, page, cdp, traffic } = await openCase({ width: 390 })
+    let releasePreview
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        const { items, photos } = fixture(85)
+        const album = items[25]
+        const preview = await page.evaluate(() => {
+            const canvas = document.createElement('canvas')
+            canvas.width = 96
+            canvas.height = 64
+            canvas.getContext('2d').fillRect(0, 0, 96, 64)
+            return canvas.toDataURL().split(',')[1]
+        })
+        const pendingPreview = new Promise(resolve => { releasePreview = resolve })
+        await page.route('**/photos/photo-{0,1}-w1920.webp', async route => {
+            await pendingPreview
+            return route.fulfill({ contentType: 'image/png', body: Buffer.from(preview, 'base64') })
+        })
+        await page.route(`**/public/albums/${album.albumId}`, route => route.fulfill({ json: {
+            album, images: [
+                { ...photos[0], width: 2400, height: 1600, previewSrcSet: undefined },
+                { ...photos[1], width: 96, height: 64, previewSrcSet: undefined },
+            ],
+        } }))
+        const card = page.locator(`.catalog-section a[href="/album/${album.albumId}"]`).first()
+        const viewportFade = page.locator('.route-page-touch-fade')
+        const returning = page.locator('main[data-route-page-motion="return"]')
+        const flight = page.locator('.lightbox-motion-flight')
+        const opacityOnly = node => node.getAnimations().some(animation =>
+            animation.effect.getKeyframes().every(frame => 'opacity' in frame && !('transform' in frame)))
+        await card.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+        await page.waitForFunction(() => document.querySelector('.linen-nav').getBoundingClientRect().bottom <= .5)
+        const scroll = () => card.evaluate(node => [scrollY, node.closest('[data-scroll-row]').scrollLeft])
+        const from = await scroll()
+        await card.tap()
+        await viewportFade.waitFor({ state: 'attached' })
+        assert.ok(await viewportFade.evaluate(opacityOnly), 'Touch route entry animates a viewport overlay')
+        assert.equal(await page.locator('main[data-route-page-motion="enter"] .linen-gallery-header h1').count(), 1,
+            'The album fade and title motion start after the album is mounted')
+        assert.equal(await page.locator('[data-route-card-morph]').count(), 0)
+        await viewportFade.waitFor({ state: 'detached' })
+
+        const dialog = page.locator('.linen-photo-lightbox')
+        const photo = dialog.locator('.is-loaded:not(.is-outgoing) img.linen-lightbox-edited')
+        const tile = page.locator('main [data-lightbox-item]').first()
+        await tile.tap()
+        assert.ok(await dialog.evaluate(opacityOnly), 'The phone opens the live photo viewer with an opacity fade')
+        assert.equal(await flight.count(), 0)
+        await dialog.evaluate(async node => {
+            node.addEventListener('transitionrun', event => {
+                if (event.propertyName === 'transform' && event.target.matches('.linen-lightbox-photo-frame')) {
+                    window.__visitor.photoRoseIntoPlace = true
+                }
+            })
+            await Promise.allSettled(node.getAnimations().map(animation => animation.finished))
+        })
+        releasePreview()
+        await page.waitForFunction(() => window.__visitor.photoRoseIntoPlace)
+        const checkSize = async () => {
+            await photo.waitFor()
+            const size = await photo.evaluate(node => ({
+                natural: node.naturalWidth, image: node.offsetWidth,
+                frame: node.closest('.linen-lightbox-photo-frame').offsetWidth,
+                stage: node.closest('.linen-lightbox-media').clientWidth,
+            }))
+            assert.equal(size.natural, 96)
+            assert.equal(size.image, size.frame, 'A small preview fills its fitted frame')
+            assert.ok(size.frame >= size.stage - 1, JSON.stringify(size))
+        }
+        await checkSize()
+        await dialog.getByRole('button', { name: 'Next photo' }).tap()
+        await dialog.getByText('2 / 2', { exact: true }).waitFor()
+        await checkSize()
+        await dialog.getByRole('button', { name: 'Close photo viewer' }).tap()
+        assert.ok(await dialog.evaluate(opacityOnly), 'Closing uses the same opacity-only path')
+        assert.equal(await flight.count(), 0)
+        await dialog.waitFor({ state: 'detached' })
+
+        await page.goBack()
+        await returning.waitFor({ state: 'attached' })
+        assert.ok(await viewportFade.evaluate(opacityOnly), 'Browser Back uses the phone route fade')
+        await viewportFade.waitFor({ state: 'detached' })
+        await returning.waitFor({ state: 'detached' })
+        assert.ok((await scroll()).every((value, index) => Math.abs(value - from[index]) <= 1), 'Phone Back restores page and row scroll')
+
+        await page.goto(`${origin}/video/${album.albumId}`)
+        await page.locator('main [data-lightbox-item]').first().tap()
+        const video = page.locator('.linen-video-lightbox')
+        assert.ok(await video.evaluate(opacityOnly))
+        assert.equal(await flight.count(), 0)
+        await page.keyboard.press('Escape')
+        await video.waitFor({ state: 'detached' })
+        assert.ok(!traffic.some(entry => /\/lightboxMotion-[^/]+\.js$/.test(entry.path)), 'Phone photo and video taps skip the morph code')
+        outcomes.push({ engine, check: 'phone route Back, photo and video fades, and a small source filling the photo frame', passed: true })
+    } finally { releasePreview?.(); await context.close() }
 }
 
 async function qrMotionCase(width) {
@@ -1412,7 +1515,8 @@ async function pageFadeCase(width) {
             window.__visitor.pageFades = []
             new MutationObserver(() => {
                 const motion = main.dataset.routePageMotion
-                const animation = main.getAnimations()[0]
+                const surface = main.parentElement.querySelector('.route-page-touch-fade') || main
+                const animation = surface.getAnimations()[0]
                 if (!motion || !animation) return
                 window.__visitor.pageFades.push({
                     motion,
@@ -1491,8 +1595,13 @@ async function pageFadeCase(width) {
         const enterFrames = await page.evaluate(() => window.__visitor.pageFades[0])
         assert.equal(enterFrames.loading, false, 'The fade runs on the page itself')
         assert.equal(enterFrames.duplicate, false, 'The new page has a single entrance fade')
-        assert.ok(enterFrames.duration >= 370 && enterFrames.duration <= 400, 'A page fades in without a long wait')
-        assert.equal(enterFrames.from, 0, 'Incoming text starts fully hidden while the route settles')
+        if (width < 500) {
+            assert.equal(enterFrames.duration, 320)
+            assert.equal(enterFrames.from, .92, 'The viewport overlay starts faded over the incoming page')
+        } else {
+            assert.ok(enterFrames.duration >= 370 && enterFrames.duration <= 400, 'A page fades in without a long wait')
+            assert.equal(enterFrames.from, 0, 'Incoming text starts fully hidden while the route settles')
+        }
         assert.equal(await page.locator('[data-route-card-morph]').count(), 0)
         await fade.waitFor({ state: 'detached' })
         // A synthetic horizontal wheel event stands in for residual trackpad
@@ -1837,21 +1946,25 @@ try {
         if (baselineRoot) await stressCase(width, true)
         await stressCase(width)
         await pageFadeCase(width)
-        await routeCardMotionCase(width)
-        await albumLowerEdgeOpeningCase(width)
-        await routeCardClipCase(width)
-        await routeCardClipCase(width, true)
-        await routeCardEdgeOnlyCase(width)
-        await routeCardEdgeOnlyCase(width, true)
-        await floatingEdgeCase(width)
-        if (width < 500) await mobileAlbumHeaderCase()
+        if (width < 500) {
+            await mobileAlbumHeaderCase()
+            await mobileMediaMotionCase()
+        } else {
+            await routeCardMotionCase(width)
+            await albumLowerEdgeOpeningCase(width)
+            await routeCardClipCase(width)
+            await routeCardClipCase(width, true)
+            await routeCardEdgeOnlyCase(width)
+            await routeCardEdgeOnlyCase(width, true)
+            await floatingEdgeCase(width)
+            await videoLightboxFrameCase(width)
+            await routeSectionMotionCase(width)
+            await routeTimelineLandingCase(width)
+            await lightboxStabilityCase(width)
+        }
         await qrMotionCase(width)
         await exploreHandoffCase(width)
-        await videoLightboxFrameCase(width)
-        await routeSectionMotionCase(width)
-        if (width >= 1080) await routeTimelineLandingCase(width)
         await calendarYearCase(width)
-        await lightboxStabilityCase(width)
         await photoDetailCase(width)
         await viewerCase(width)
         await viewerCase(width, true)

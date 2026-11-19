@@ -255,7 +255,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                 {loading && <AlbumLoadingSkeleton />}
 
                 {!loading && !album && (
-                    <div className="py-24 text-center">
+                    <div className="py-24 text-center" data-route-gallery-error="">
                         <p className="text-warm-gray">{loadError || 'This album could not be loaded.'}</p>
                         {onBack && <button onClick={onBack} className="mt-4 text-amber hover:underline">Go Back</button>}
                     </div>

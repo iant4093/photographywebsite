@@ -15,11 +15,17 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
     const suppressClickRef = useRef(false)
     if (!visible && zoom.zoomed) setZoom(INITIAL_ZOOM)
 
-    const width = Number(imageProps.width) || naturalSize?.width
-    const height = Number(imageProps.height) || naturalSize?.height
+    const sourceWidth = Number(imageProps.width)
+    const sourceHeight = Number(imageProps.height)
+    const hasSourceSize = Number.isFinite(sourceWidth) && sourceWidth > 0 && Number.isFinite(sourceHeight) && sourceHeight > 0
+    const width = hasSourceSize ? sourceWidth : naturalSize?.width
+    const height = hasSourceSize ? sourceHeight : naturalSize?.height
     const fit = width > 0 && height > 0 && bounds.width > 0 && bounds.height > 0
-        ? Math.min(1, bounds.width / width, bounds.height / height)
+        ? Math.min(bounds.width / width, bounds.height / height)
         : null
+    // The frame supplies the fitted dimensions. An image with width/height
+    // auto can stay at the preview file's small intrinsic size inside it.
+    const imageStyle = fit === null ? imageProps.style : { ...imageProps.style, width: '100%', height: '100%', objectFit: 'contain' }
     const interactive = loaded && visible && !outgoing
     const Frame = outgoing ? 'div' : 'button'
     const scale = zoom.zoomed ? ZOOM_SCALE : 1
@@ -137,6 +143,7 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
                 <img
                     key={detailUrl ? 'full-resolution' : 'preview'}
                     {...imageProps}
+                    style={imageStyle}
                     src={detailUrl || imageProps.src}
                     srcSet={detailUrl ? undefined : imageProps.srcSet}
                     sizes={detailUrl ? undefined : imageProps.sizes}

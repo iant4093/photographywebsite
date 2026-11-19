@@ -518,8 +518,7 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(readTop).toHaveBeenCalledOnce()
   })
 
-  it.each(['(max-width: 720px)', '(pointer: coarse)'])('keeps scroll animations on every gallery route with %s', (deviceQuery) => {
-    window.matchMedia = vi.fn(query => ({ matches: query.includes(deviceQuery) }))
+  it('keeps desktop scroll animations across the gallery routes', () => {
     for (const path of ['/', '/videos', '/search', '/stats', '/explore', '/album/example', '/video/example', '/sharedalbum/example', '/dashboard']) {
       const view = renderExperience(path)
       const targets = [...view.container.querySelectorAll('.editorial-motion-frame')]
@@ -576,8 +575,6 @@ describe('MotionExperience film-strip scrollbar', () => {
   it('updates the mobile scroll rail without scanning card offsets when only the toolbar height changes', () => {
     window.matchMedia = vi.fn(query => ({ matches: query === '(pointer: coarse)' }))
     const { container } = renderExperience()
-    const viewportProbe = document.body.lastElementChild
-    Object.defineProperty(viewportProbe, 'offsetHeight', { configurable: true, value: 1000 })
     const readTop = vi.fn(() => 600)
     Object.defineProperty(container.querySelector('.album-card'), 'offsetTop', { configurable: true, get: readTop })
     flushFrames()
@@ -588,10 +585,7 @@ describe('MotionExperience film-strip scrollbar', () => {
     flushFrames()
     expect(screen.getByRole('scrollbar')).toHaveAttribute('aria-valuenow', '40')
     expect(readTop).not.toHaveBeenCalled()
-    Object.defineProperty(viewportProbe, 'offsetHeight', { configurable: true, value: 500 })
-    fireEvent.resize(window)
-    flushFrames()
-    expect(readTop).toHaveBeenCalledOnce()
+    expect(container.querySelectorAll('.editorial-motion-frame')).toHaveLength(0)
   })
 
   it('hands poses to scroll-driven animations where the browser supports scroll timelines', () => {

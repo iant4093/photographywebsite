@@ -112,3 +112,12 @@
     animation: none;
   }
 }
+
+@media (pointer: coarse) {
+  .linen-site :is(.album-card, .linen-media-frame) {
+    transform: none;
+    transition: transform 150ms ease-out;
+  }
+
+  .linen-site :is(.album-card, .linen-media-frame):active { transform: scale(.98); }
+}

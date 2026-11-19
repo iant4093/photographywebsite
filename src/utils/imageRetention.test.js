@@ -203,6 +203,29 @@ describe('album viewport loading priority', () => {
         expect(below.change).toHaveBeenCalledWith(true)
     })
 
+    it('loads visible cards first on phones and only starts one nearby image at a time', () => {
+        vi.stubGlobal('matchMedia', query => ({ matches: query === '(pointer: coarse)' }))
+        const list = Array.from({ length: 3 }, () => {
+            const element = document.createElement('div'), change = vi.fn()
+            const control = observeRetainedImage(element, change)
+            disposers.push(control.dispose)
+            return { element, change, ...control }
+        })
+        const [visible, firstNearby, secondNearby] = list
+        notify('360px 0px', list.map(item => [item.element, true]))
+        notify('0px', list.map(item => [item.element, item === visible]))
+        vi.advanceTimersByTime(20)
+        expect(visible.change).toHaveBeenCalledWith(true)
+        expect(firstNearby.change).not.toHaveBeenCalled()
+        visible.loaded(image)
+        vi.advanceTimersByTime(20)
+        expect(firstNearby.change).toHaveBeenCalledWith(true)
+        expect(secondNearby.change).not.toHaveBeenCalled()
+        firstNearby.loaded(image)
+        vi.advanceTimersByTime(20)
+        expect(secondNearby.change).toHaveBeenCalledWith(true)
+    })
+
     it.each([
         [{ downlink: 10, rtt: 50 }, 2],
         [{ downlink: 1.5 }, 1],

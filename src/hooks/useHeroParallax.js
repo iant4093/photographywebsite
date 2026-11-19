@@ -4,7 +4,7 @@ import useMediaQuery from './useMediaQuery'
 // `followerRef` (optional) receives the same transform in the same frame, so
 // layered media such as the video hero reel moves exactly with the hero.
 export default function useHeroParallax(ref, speed, maximum, followerRef) {
-    const disabled = useMediaQuery('(prefers-reduced-motion: reduce)')
+    const disabled = useMediaQuery('(prefers-reduced-motion: reduce), (pointer: coarse)')
     useEffect(() => {
         const hero = ref.current
         if (!hero || disabled) return undefined
