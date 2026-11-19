@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
-import { createImageSnapshot } from '../utils/imageSnapshot'
 import './RouteCardMotion.css'
 
 const reducedMotion = '(prefers-reduced-motion: reduce)'
@@ -126,34 +125,6 @@ function headingPose(heading) {
     return frame ? { frame, title: titleGeometry(heading), element: heading } : null
 }
 
-function floatingPhotoStrip(card) {
-    const lane = card.closest('.floating-lane')
-    const bitmap = card.querySelector('.progressive-image-snapshot, img.progressive-image-ready')
-    const placeholder = card.querySelector('.progressive-image-placeholder')
-    const media = bitmap ?? placeholder
-    if (!lane || !media) return null
-    const row = lane.getBoundingClientRect()
-    const rect = media.getBoundingClientRect()
-    const frame = viewportRect(rect, row, true)
-    if (!frame) return null
-    const pixels = bitmap && createImageSnapshot(bitmap)
-    if (!pixels && !placeholder) return null
-
-    const strip = document.createElement('div')
-    strip.className = 'route-card-photo-strip'
-    Object.assign(strip.style, geometry(frame), {
-        maskImage: getComputedStyle(lane).maskImage,
-        maskSize: `${row.width}px 100%`,
-        maskPosition: `${row.left - frame.left}px 0px`,
-        maskRepeat: 'no-repeat',
-    })
-    const image = pixels || document.createElement('div')
-    Object.assign(image.style, geometry({ left: rect.left - frame.left, top: rect.top - frame.top, width: rect.width, height: rect.height }),
-        pixels ? { objectFit: 'cover' } : { backgroundImage: placeholder.style.backgroundImage, backgroundSize: 'cover', backgroundPosition: 'center' })
-    strip.append(image)
-    return strip
-}
-
 function capture(card, location) {
     const wall = card.closest('.floating-print-wall')
     const phases = wall && [...wall.querySelectorAll(floatingTracks)]
@@ -161,9 +132,8 @@ function capture(card, location) {
     const current = readTitleStyle(cardPose(card))
     const pose = current && { frame: current.frame, clipped: current.clipped, clip: current.clip, edge: current.edge,
         inlineBounds: current.inlineBounds, title: current.title }
-    const preview = card.dataset.routeCard === 'floating' && pose?.clipped ? floatingPhotoStrip(card) : null
     return { from: location, marker: card.dataset.routeCard, path: cardPath(card), pose, phases,
-        preview, inMain: mainPage()?.contains(card), scrollY: window.scrollY,
+        inMain: mainPage()?.contains(card), scrollY: window.scrollY,
         navbarVisible: navbar()?.hasAttribute('data-navbar-visible') }
 }
 
@@ -194,9 +164,10 @@ function scrollPoseReady(card) {
 
 function holdFloatingTracks(phases) {
     const wall = mainPage()?.querySelector('.floating-print-wall')
-    if (!wall) return undefined
+    const tracks = wall?.querySelectorAll(floatingTracks)
+    if (!tracks?.length) return undefined
     wall.dataset.routeCardHold = ''
-    wall.querySelectorAll(floatingTracks).forEach((track, index) => {
+    tracks.forEach((track, index) => {
         const animation = track.getAnimations()[0]
         if (animation && Number.isFinite(phases[index])) {
             animation.currentTime = animation.effect.getTiming().duration * phases[index]
@@ -224,6 +195,7 @@ const moduleReturnReveal = { ...returnReveal, duration: 420 }
 const clippedEntryReveal = { ...stagedReveal, delay: 165 }
 const clippedReturnReveal = { ...returnReveal, duration: 455 }
 const floatingEntryReveal = { ...clippedEntryReveal, delay: 90 }
+const floatingReturnReveal = { ...clippedReturnReveal, duration: 400 }
 const routeReveal = { duration: 390, fill: 'backwards', easing: 'ease-in-out' }
 
 function holdNavbarForReturn(visible) {
@@ -332,7 +304,8 @@ function holdCardHover(card) {
 }
 
 function handoffTitle(target, outgoing, live, reveal) {
-    const shortHandoff = reveal === clippedReturnReveal || reveal === floatingEntryReveal || reveal === moduleReturnReveal
+    const shortHandoff = reveal === clippedReturnReveal || reveal === floatingEntryReveal
+        || reveal === floatingReturnReveal || reveal === moduleReturnReveal
     const early = reveal === returnReveal
     const duration = shortHandoff ? 40 : early ? 44 : 70
     const lead = shortHandoff ? 34 : early ? 48 : 64
@@ -407,7 +380,7 @@ function animateEdgeTitle(titleWindow, label, heading, card, returning, travel, 
     return { motions: [...motions, handoff], handoff: handoff.finished }
 }
 
-function stageCard(main, from, returning, record, preview) {
+function stageCard(main, from, returning, record) {
     const layer = document.createElement('div')
     layer.dataset.routeCardMorph = ''
     layer.setAttribute('aria-hidden', 'true')
@@ -422,7 +395,6 @@ function stageCard(main, from, returning, record, preview) {
     // still on screen. The row's top edge must not cut into that title as it rises.
     const clearBottomTitle = !returning && marker === 'album' && from.edge?.y === 1 && from.edge.x === 0
         && from.title && !from.title.crop
-    if (preview) layer.append(preview)
     const outline = marker === 'section' || wasClipped || moduleReturn ? null : document.createElement('div')
     if (outline) {
         outline.className = 'route-card-outline'
@@ -444,7 +416,10 @@ function stageCard(main, from, returning, record, preview) {
     let interactiveTimer
     return {
         reveal(to) {
-            if (isClipped(to)) return returning ? clippedReturnReveal : marker === 'floating' ? floatingEntryReveal : clippedEntryReveal
+            if (isClipped(to)) {
+                if (marker === 'floating') return returning ? floatingReturnReveal : floatingEntryReveal
+                return returning ? clippedReturnReveal : clippedEntryReveal
+            }
             return moduleReturn ? moduleReturnReveal : earlyReturn ? returnReveal : stagedReveal
         },
         play(to, reveal) {
@@ -453,9 +428,6 @@ function stageCard(main, from, returning, record, preview) {
             const duration = floating ? floatingTravelMs : clipped ? clippedTravelMs
                 : earlyReturn ? cardReturnTravelMs : albumMorph ? albumCardTravelMs : cardTravelMs
             const travel = { duration, fill: 'both', easing: floating ? floatingEasing : clipped ? clippedEasing : easing }
-            if (preview) animations.push(preview.animate([{ opacity: 1 }, { opacity: .82, offset: .22 }, { opacity: 0 }], {
-                duration: 210, easing: 'ease-in-out', fill: 'forwards',
-            }))
             const matchingTitle = label && matchingTitles(from.title, to?.title) && to.element
             const croppedCard = returning ? to : from
             const bounds = floating && croppedCard?.inlineBounds
@@ -505,7 +477,6 @@ function stageCard(main, from, returning, record, preview) {
             delete main.dataset.routePageRevealing
             layer.remove()
             animations.forEach(animation => animation.cancel())
-            preview?.remove()
             resumeHover?.()
         },
     }
@@ -593,13 +564,6 @@ export default function RouteCardMotion() {
         const runtime = state.current
         const render = (record, returning, inline = false) => {
             runtime.stop?.()
-            // Keep just the latest strip for a quick history replay, while
-            // the restored carousel is still painting its thumbnails.
-            if (!returning && record?.preview) {
-                runtime.floatingPreview = { record, strip: record.preview }
-                record.preview = null
-            }
-            const preview = !returning && runtime.floatingPreview?.record === record ? runtime.floatingPreview?.strip : null
             if (!motionAllowed()) return
             const main = mainPage()
             if (!main) return
@@ -615,12 +579,14 @@ export default function RouteCardMotion() {
                 runtime.stop = fadeRoute({ returning, onFinish: releaseNavbar, timing, phases: returning ? record?.phases : undefined })
                 return
             }
-            const stage = canStage && !opensPlayer ? stageCard(main, from, returning, record, preview) : null
+            const stage = canStage && !opensPlayer ? stageCard(main, from, returning, record) : null
             let frame
             let release
             let resumeTracks
             let stagedTitle
             let previousFrame
+            let fontElement
+            let titleFont
             let landingScroll
             const started = performance.now()
             const settleMs = returning ? 50 : record?.marker === 'floating' && from?.clipped ? 34 : 72
@@ -681,9 +647,19 @@ export default function RouteCardMotion() {
                     if (title) title.dataset.routeTitleLanding = ''
                 }
                 const target = to?.title?.rect ?? (albumMorph ? to?.frame : null)
-                const stable = elapsed >= settleMs && document.fonts?.status !== 'loading' && target && previousFrame
+                let stable = elapsed >= settleMs && target && previousFrame
                     && (!returning || scrollPoseReady(to?.card))
                     && ['left', 'top', 'width', 'height'].every(key => Math.abs(target[key] - previousFrame[key]) < .3)
+                if (stable && to?.title && document.fonts?.status === 'loading') {
+                    // Body or icon fonts can still be loading when the heading
+                    // is ready. Measure only the face that owns the handoff.
+                    if (fontElement !== to.element) {
+                        fontElement = to.element
+                        const { fontStyle, fontWeight, fontSize, fontFamily } = getComputedStyle(fontElement)
+                        titleFont = `${fontStyle} ${fontWeight} ${fontSize} ${fontFamily}`
+                    }
+                    stable = document.fonts.check(titleFont, to.title.text)
+                }
                 previousFrame = target
                 const expired = elapsed >= (target ? 650 : 420)
                 if (ready && (stable || !from || expired)) {
@@ -693,7 +669,7 @@ export default function RouteCardMotion() {
                     if (!returning && settled) record.heading = { frame: settled.frame, title: settled.title }
                     const landing = title || edgeMorph ? settled : null
                     if (!landing) clearTitle()
-                    if (stage && !landing && albumMorph && !preview) {
+                    if (stage && !landing && albumMorph) {
                         stage.remove()
                         release = revealPage(main, { returning, onFinish: cleanup, timing })
                         return
@@ -727,7 +703,7 @@ export default function RouteCardMotion() {
             if (main && next?.marker === 'floating' && next.from.key === runtime.location.key) {
                 const card = returnedCard(main, next)?.card
                 const current = card && capture(card, runtime.location)
-                if (current && (current.preview || !current.pose?.clipped)) runtime.history.set(key, current)
+                if (current?.pose) runtime.history.set(key, current)
             }
         }
         const click = event => {

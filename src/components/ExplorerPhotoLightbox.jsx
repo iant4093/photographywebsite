@@ -7,6 +7,7 @@ import LightboxShareButton from './LightboxShareButton'
 import LightboxPrintLink from './LightboxPrintLink'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import usePhotoPreview from '../hooks/usePhotoPreview'
+import useMediaQuery from '../hooks/useMediaQuery'
 import { loadExplorerViewer, readExplorerViewer } from '../utils/explorerViewer'
 import { mediaBeforeDisplayUrl, mediaBeforeSrcSet, mediaDisplayUrl, mediaId, mediaPreviewSrcSet } from '../utils/mediaUrls'
 import { photoDescription } from '../utils/mediaAccessibility'
@@ -29,6 +30,8 @@ export default function ExplorerPhotoLightbox(props) {
     const lastInput = useRef(0)
     const pointerDown = useRef(false)
     const { containerRef, sizesFor, bounds } = useContainedImageSizes()
+    const isTouch = useMediaQuery('(pointer: coarse)')
+    const [entranceFinished, setEntranceFinished] = useState(false)
     const image = props.images[props.index]
     const imageId = image ? (mediaId(image) || props.index) : null
     const refreshRef = useRef({ image, callback: props.onBeforeRefresh })
@@ -51,15 +54,16 @@ export default function ExplorerPhotoLightbox(props) {
         if (!comparisonRequested && image.before.status === 'unresolved') void Promise.resolve(props.onBeforeRefresh?.(event, image)).catch(() => {})
     }
 
+    const canWarmNext = !isTouch || (entranceFinished && !outgoing)
     useEffect(() => {
-        if (Viewer || readyImage !== imageId || props.images.length < 2 || !bounds.width || !bounds.height) return undefined
+        if (!canWarmNext || Viewer || readyImage !== imageId || props.images.length < 2 || !bounds.width || !bounds.height) return undefined
         let release = () => {}
         const timer = window.setTimeout(() => {
             const next = props.images[(props.index + 1) % props.images.length]
             release = prefetchPhoto(next, Number.parseFloat(sizesFor(next)))
         }, 200)
         return () => { window.clearTimeout(timer); release() }
-    }, [Viewer, readyImage, imageId, props.images, props.index, bounds.width, bounds.height, sizesFor])
+    }, [canWarmNext, Viewer, readyImage, imageId, props.images, props.index, bounds.width, bounds.height, sizesFor])
 
     useEffect(() => {
         let active = true
@@ -141,7 +145,7 @@ export default function ExplorerPhotoLightbox(props) {
     return (
         <AccessibleLightbox
             explicitTabOrder
-            motion={{ kind: 'photo', originKind: 'button', key: imageId }}
+            motion={{ kind: 'photo', originKind: 'button', key: imageId, onOpened: () => setEntranceFinished(true) }}
             onPointerDownCapture={() => { pointerDown.current = true; lastInput.current = Date.now() }}
             onPointerUpCapture={() => { pointerDown.current = false; lastInput.current = Date.now() }}
             onPointerCancelCapture={() => { pointerDown.current = false }}
@@ -158,7 +162,7 @@ export default function ExplorerPhotoLightbox(props) {
             onPrevious={props.images.length > 1 ? props.onPrevious : undefined}
             className={`${Viewer ? '' : 'explorer-viewer-pending'} linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0`}
         >
-            {Viewer ? <Viewer {...props} embedded initialFocusRef={closeControl}
+            {Viewer ? <Viewer {...props} embedded initialFocusRef={closeControl} parentEntranceFinished={entranceFinished}
                 initialImageReady={imageId !== null && readyImage === imageId}
                 initialComparisonRequested={comparisonRequested} initialOriginalReady={originalReady && Boolean(beforeUrl)} /> : <>
             <button ref={closeControl} type="button" onClick={props.onClose} aria-label="Close photo viewer" title="Close Photo Viewer"

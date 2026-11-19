@@ -989,10 +989,6 @@
   white-space: nowrap;
 }
 
-.linen-site .floating-card-copy strong::before {
-  content: attr(data-title);
-}
-
 .linen-site .floating-card-copy small {
   flex: none;
   color: var(--color-warm-gray);

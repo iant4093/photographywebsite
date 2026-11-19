@@ -12,6 +12,7 @@ import LightboxShareButton from './LightboxShareButton'
 import LightboxPrintLink from './LightboxPrintLink'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import usePhotoPreview from '../hooks/usePhotoPreview'
+import useMediaQuery from '../hooks/useMediaQuery'
 import PhotoZoomFrame from './PhotoZoomFrame'
 import PhotoLightboxNavigation from './PhotoLightboxNavigation'
 import { photoDescription } from '../utils/mediaAccessibility'
@@ -90,9 +91,12 @@ function PhotoLightbox({
     initialComparisonRequested = false,
     initialOriginalReady = false,
     embedded = false,
+    parentEntranceFinished = true,
     initialFocusRef,
 }) {
     const { containerRef, sizesFor, bounds } = useContainedImageSizes()
+    const isTouch = useMediaQuery('(pointer: coarse)')
+    const [entranceFinished, setEntranceFinished] = useState(false)
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
     // An explorer's small loading dialog may already have displayed this exact
@@ -127,15 +131,16 @@ function PhotoLightbox({
     // Returning to a previous photograph also starts with its edit.
     if (comparison.id !== activeId) setComparison(freshComparison(activeId))
 
+    const canWarmNext = !isTouch || ((embedded ? parentEntranceFinished : entranceFinished) && !outgoingImage)
     useEffect(() => {
-        if (loadedImageId !== activeId || images.length < 2 || !bounds.width || !bounds.height) return undefined
+        if (!canWarmNext || loadedImageId !== activeId || images.length < 2 || !bounds.width || !bounds.height) return undefined
         let release = () => {}
         const timer = window.setTimeout(() => {
             const next = images[(index + 1) % images.length]
             release = prefetchPhoto(next, Number.parseFloat(sizesFor(next)))
         }, 200)
         return () => { window.clearTimeout(timer); release() }
-    }, [activeId, loadedImageId, images, index, sizesFor, bounds.width, bounds.height])
+    }, [canWarmNext, activeId, loadedImageId, images, index, sizesFor, bounds.width, bounds.height])
 
     useEffect(() => () => {
         refreshedOriginalsRef.current.clear()
@@ -325,7 +330,8 @@ function PhotoLightbox({
     return (
         <Dialog
             explicitTabOrder
-            motion={{ kind: 'photo', key: activeId, origin: motionOrigin, originKind: motionOrigin?.kind }}
+            motion={{ kind: 'photo', key: activeId, origin: motionOrigin, originKind: motionOrigin?.kind,
+                onOpened: () => setEntranceFinished(true) }}
             ariaLabel={ariaLabel}
             onClose={onClose}
             onNext={images.length > 1 && !adminControls?.deleting ? onNext : undefined}

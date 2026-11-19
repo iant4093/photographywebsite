@@ -39,13 +39,9 @@ main[data-route-page-staged]:not([data-route-page-revealing]) .skeleton-shimmer 
 }
 
 .route-card-outline,
-.route-card-title,
-.route-card-photo-strip,
-.route-card-photo-strip > * {
+.route-card-title {
     position: absolute;
 }
-
-.route-card-photo-strip { overflow: hidden; }
 
 .route-card-title-window {
     position: absolute;

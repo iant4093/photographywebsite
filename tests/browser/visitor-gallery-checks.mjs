@@ -545,17 +545,24 @@ async function lightboxStabilityCase(width) {
             const animations = element.getAnimations().map(animation => ({
                 frames: animation.effect.getKeyframes(), duration: animation.effect.getTiming().duration,
             }))
-            const movement = animations.find(animation => animation.frames[0].width !== undefined)
+            const movement = animations.find(animation => 'width' in animation.frames[0] || 'transform' in animation.frames[0])
             const fade = animations.find(animation => animation.frames[0].opacity !== undefined)
-            const { left, top, width, height } = movement.frames.at(-1)
-            return { rect: [left, top, width, height].map(Number.parseFloat), stillMs: fade.duration - movement.duration,
-                opacity: fade.frames.map(frame => Number(frame.opacity)) }
+            const { left, top, width, height, transform } = movement.frames.at(-1)
+            const matrix = transform && new DOMMatrixReadOnly(transform)
+            const { style } = element
+            const rect = matrix ? [
+                parseFloat(style.left) + matrix.e, parseFloat(style.top) + matrix.f,
+                parseFloat(style.width) * matrix.a, parseFloat(style.height) * matrix.d,
+            ] : [left, top, width, height].map(Number.parseFloat)
+            return { rect, transformOnly: Boolean(transform) && movement.frames.every(frame => !('width' in frame || 'height' in frame)),
+                stillMs: fade.duration - movement.duration, opacity: fade.frames.map(frame => Number(frame.opacity)) }
         })
         const crop = await tile.locator('img').evaluate(element => {
             const { left, top, width, height } = element.getBoundingClientRect()
             return [left, top, width, height]
         })
         assert.ok(landing.rect.every((value, index) => Math.abs(value - crop[index]) < 1), 'The return lands on the thumbnail crop inside the card')
+        if (width < 500 && engine !== 'firefox') assert.ok(landing.transformOnly, 'Touch returns do not resize the photo layer')
         assert.ok(landing.stillMs >= 80, 'The thumbnail stays at its final size through the last part of the dissolve')
         assert.deepEqual(landing.opacity, [1, 1, 0], 'The returning photo and frame dissolve together onto the existing thumbnail')
         assert.equal(await hiddenTiles.count(), 0)
@@ -604,14 +611,14 @@ async function lightboxStabilityCase(width) {
                 return {
                     label: element.querySelector('span')?.textContent,
                     keyframes: animations.flatMap(animation => animation.effect.getKeyframes()),
+                    surface: getComputedStyle(element.querySelector('.lightbox-motion-crop') ?? element).backgroundColor,
                     fade: fade.effect.getTiming(),
                 }
             })
             assert.equal(layers.label, undefined, 'The button label should stay on the page')
             assert.ok(layers.keyframes.some(frame => Number(frame.opacity) === 0), 'The entire image frame fades with the picture')
-            const surfaces = layers.keyframes.filter(frame => frame.backgroundColor !== undefined)
-            assert.ok(surfaces.length && surfaces.every(frame => frame.backgroundColor === 'rgba(0, 0, 0, 0)'),
-                'A text button has no filled flying box')
+            const surfaces = [layers.surface, ...layers.keyframes.filter(frame => 'backgroundColor' in frame).map(frame => frame.backgroundColor)]
+            assert.ok(surfaces.every(color => color === 'rgba(0, 0, 0, 0)'), 'A text button has no filled flying box')
             if (closing) {
                 assert.ok(layers.fade.duration >= 400 && layers.fade.delay === 0, 'Button launches close with an immediate, gradual fade')
                 const hiddenAt = layers.keyframes.find(frame => Number(frame.opacity) === 0)?.computedOffset
@@ -1715,6 +1722,10 @@ async function floatingEdgeCase(width) {
         const href = await card.getAttribute('href')
         const hold = new Promise(resolve => { releaseAlbum = resolve })
         await page.route(`**/public/albums/${href.split('/').at(-1)}`, async route => { await hold; await route.fallback() })
+        await page.evaluate(async () => {
+            await document.fonts.ready
+            Object.defineProperty(document.fonts, 'status', { configurable: true, value: 'loading' })
+        })
         const edge = await card.evaluate(element => {
             const lane = element.closest('.floating-lane')
             const track = element.closest('.floating-loop-track')
@@ -1735,38 +1746,40 @@ async function floatingEdgeCase(width) {
         assert.ok(edge.hit && edge.fraction > .1 && edge.fraction < .25, 'A sliver of the auto-scrolling card is clickable')
         if (width < 500 && engine !== 'firefox') await page.touchscreen.tap(edge.x, edge.y)
         else await page.mouse.click(edge.x, edge.y)
-        const strip = page.locator('.route-card-photo-strip')
-        await strip.waitFor({ state: 'attached' })
-        const held = await strip.evaluate(element => ({
-            left: element.getBoundingClientRect().left,
-            appearsBeforeHeading: !document.querySelector('.route-card-title'),
-            hasPixels: Boolean(element.querySelector('canvas')),
-        }))
-        assert.ok(Math.abs(held.left - edge.left) < 2 && held.appearsBeforeHeading && held.hasPixels,
-            'The already-painted thumbnail stays at the clicked edge while the heading loads')
+        const morph = page.locator('[data-route-card-morph]')
+        const floatingMedia = morph.locator('img, canvas, svg, video, .route-card-photo-strip, .route-card-outline')
+        await morph.waitFor({ state: 'attached' })
+        assert.equal(await floatingMedia.count(), 0, 'The original carousel takes its covers with it during a cold departure')
         releaseAlbum()
         const entering = page.locator('main[data-route-page-motion="enter"]')
         await entering.waitFor({ state: 'attached' })
-        const motion = await strip.evaluate(element => {
-            const preview = element.getAnimations()[0]
-            const title = document.querySelector('.route-card-title')
+        const motion = await morph.evaluate(element => {
+            const title = element.querySelector('.route-card-title')
             const travel = title?.getAnimations().find(animation => animation.effect.getKeyframes()[0].transform)
             const fade = document.querySelector('main').getAnimations()[0]
-            return { stationary: preview.effect.getKeyframes().every(frame => frame.transform === undefined),
-                travel: travel?.effect.getTiming().duration, startsBeforeStripLeaves: fade.effect.getTiming().delay < preview.effect.getTiming().duration,
-                box: Boolean(document.querySelector('.route-card-outline')) }
+            return { travel: travel?.effect.getTiming().duration, revealDelay: fade.effect.getTiming().delay }
         })
-        assert.deepEqual(motion, { stationary: true, travel: 320, startsBeforeStripLeaves: true, box: false })
+        assert.deepEqual(motion, { travel: 320, revealDelay: 90 })
+        assert.equal(await floatingMedia.count(), 0, 'Only the title lifts from the carousel edge')
+        await page.evaluate(() => { delete document.fonts.status })
         await entering.waitFor({ state: 'detached' })
-        await strip.waitFor({ state: 'detached' })
+        await morph.waitFor({ state: 'detached' })
         await page.goBack()
         const returning = page.locator('main[data-route-page-motion="return"]')
         await returning.waitFor({ state: 'attached' })
+        const heldTrack = page.locator('.floating-print-wall[data-route-card-hold] .floating-loop-track').first()
+        assert.equal(await heldTrack.evaluate(track => getComputedStyle(track).animationPlayState), 'paused')
+        assert.equal(await returning.evaluate(main => main.getAnimations()[0].effect.getTiming().duration), 400)
         await returning.waitFor({ state: 'detached' })
         await page.goForward()
-        await strip.waitFor({ state: 'attached' })
-        assert.equal(await strip.locator('canvas').count(), 1, 'A quick Forward replay keeps the thumbnail handoff')
-        const result = { engine, width, check: 'an off-edge auto-scrolling card keeps its thumbnail visible through the first frames', passed: true }
+        await morph.waitFor({ state: 'attached' })
+        await entering.waitFor({ state: 'attached' })
+        assert.ok(await morph.locator('.route-card-title').evaluateAll(titles => titles.some(title =>
+            title.getAnimations().some(animation => 'transform' in animation.effect.getKeyframes()[0]))),
+        'A quick Forward replay still moves the title')
+        assert.equal(await floatingMedia.count(), 0, 'Forward leaves the cover with the carousel')
+        await entering.waitFor({ state: 'detached' })
+        const result = { engine, width, check: 'a clipped carousel cover leaves with the other cards, while the title moves on entry and Forward', passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { releaseAlbum?.(); await context.close() }
 }

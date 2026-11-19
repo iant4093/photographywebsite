@@ -114,7 +114,7 @@ function makeFlight(dialog, origin, src, panel) {
     return { shell, image, label }
 }
 
-function playPhotoEntrance(flight, from, to, fromShape, toShape, play) {
+function playPhotoTravel(flight, from, to, fromShape, toShape, play, reverse, duration) {
     const { shell, image } = flight
     const { boxShadow, borderRadius, backgroundColor, ...surface } = toShape
     Object.assign(shell.style, surface)
@@ -131,24 +131,29 @@ function playPhotoEntrance(flight, from, to, fromShape, toShape, play) {
 
     const startX = from.width / to.width
     const startY = from.height / to.height
-    play(shell, [{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${startX}, ${startY})` },
-        { transform: 'translate(0px, 0px) scale(1, 1)' }])
+    const thumbnail = { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${startX}, ${startY})` }
+    const fitted = { transform: 'translate(0px, 0px) scale(1, 1)' }
+    const options = { duration }
+    play(shell, reverse ? [fitted, thumbnail] : [thumbnail, fitted], options)
     if (startX !== startY) {
         // The shell changes aspect ratio to reveal the crop. Counter-scale
         // the image around its center so the photograph itself never stretches.
         play(image, Array.from({ length: 17 }, (_, step) => {
             const offset = step / 16
-            const x = startX + (1 - startX) * offset
-            const y = startY + (1 - startY) * offset
+            const progress = reverse ? 1 - offset : offset
+            const x = startX + (1 - startX) * progress
+            const y = startY + (1 - startY) * progress
             const cover = Math.max(x, y)
             return { offset, transform: `scale(${cover / x}, ${cover / y})` }
-        }))
+        }), options)
     }
-    if (fromShape.borderRadius !== borderRadius) play(crop, [{ borderRadius: fromShape.borderRadius }, { borderRadius }])
+    const thumbnailCorner = { borderRadius: fromShape.borderRadius }
+    const fittingCorner = { borderRadius }
+    if (fromShape.borderRadius !== borderRadius) play(crop, reverse ? [fittingCorner, thumbnailCorner] : [thumbnailCorner, fittingCorner], options)
     else crop.style.borderRadius = borderRadius
-    // The thumbnail frame stays behind the dialog. Fade the final rim in as
+    // The thumbnail frame stays behind the dialog. Fade the viewer rim as
     // the photo moves so its shadow can reuse one painted layer.
-    play(rim, [{ opacity: 0 }, { opacity: 1 }])
+    play(rim, reverse ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1 }], options)
 }
 
 function opacity(element) {
@@ -328,8 +333,12 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
         const backdrop = getComputedStyle(dialog).backgroundColor
         dialog.dataset.lightboxTravelling = kind
         let flightTravel
-        if (kind === 'photo' && !reverse && origin.kind === 'photo') {
-            playPhotoEntrance(flight, from, rect, fromShape, toShape, play)
+        const touchPhoto = kind === 'photo' && window.matchMedia?.('(pointer: coarse)').matches
+        const thumbnailEntrance = kind === 'photo' && !reverse && origin.kind === 'photo'
+        // A settled viewer starts at its fitted size. Interrupted entrances keep
+        // the positional fallback so an in-flight pose can still reverse in place.
+        if (thumbnailEntrance || (touchPhoto && !current?.flight)) {
+            playPhotoTravel(flight, from, rect, fromShape, toShape, play, reverse, photoReturn ? photoLandingMs : duration)
         } else {
             flightTravel = play(shell, reverse ? [current?.flight ?? toShape, fromShape] : [fromShape, toShape],
                 photoReturn ? { duration: photoLandingMs } : undefined)
@@ -355,8 +364,10 @@ function runMotion(dialog, { kind, origin, originKind = origin?.kind, reverse, c
         } else if (photoReturn) {
             play(shell, [{ opacity: 1 }, { opacity: 1, offset: .45 }, { opacity: 0 }], { easing: 'linear' })
             if (thumbnailStyle && flight.image) {
-                play(flight.image, [{ objectPosition: getComputedStyle(targetImage).objectPosition }, { objectPosition: thumbnailStyle.objectPosition }],
-                    { duration: photoLandingMs })
+                const objectPosition = getComputedStyle(targetImage).objectPosition
+                if (objectPosition !== thumbnailStyle.objectPosition) {
+                    play(flight.image, [{ objectPosition }, { objectPosition: thumbnailStyle.objectPosition }], { duration: photoLandingMs })
+                }
             }
         }
 

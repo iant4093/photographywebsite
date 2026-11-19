@@ -91,7 +91,7 @@ function GalleryCard({ album, position, duplicate, responsiveSrcSet }) {
                 className="h-full w-full"
             />
             <span className="floating-card-copy">
-                <strong data-title={album.title} />
+                <strong data-title={album.title}>{album.title}</strong>
                 <small data-category={album.category || 'Uncategorized'} />
             </span>
         </Link>
