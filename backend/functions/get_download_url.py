@@ -1,4 +1,4 @@
-"""Authorize on-demand media downloads and camera-original comparisons."""
+"""Authorize media downloads, protected print handoffs, and camera-original comparisons."""
 
 import logging
 import os
@@ -24,6 +24,8 @@ from zip_helpers import get_album_record
 logger = logging.getLogger("photography_api.get_download_url")
 MEDIA_ID_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+PRINT_SOURCE_TTL_SECONDS = 300
+PRINT_SOURCE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
 
 def _not_found():
@@ -36,14 +38,15 @@ def _is_original_comparison(event):
     return str(request.get("rawPath") or "").endswith("/original-comparison") or str(route_key).endswith("/original-comparison")
 
 
-def _audit(event, context, outcome, reason_code, *, actor_type=None, auth_method=None):
+def _audit(event, context, outcome, reason_code, *, actor_type=None, auth_method=None, printing=False):
     classified_actor, classified_auth = actor_context(event)
     comparison = _is_original_comparison(event)
+    operation = "print" if printing else "original" if comparison else "download"
     emit_audit_event(
-        event_name="media.original_authorized" if comparison else "media.download_authorized",
+        event_name=f"media.{operation}_authorized",
         outcome=outcome,
-        action="media.original.authorize" if comparison else "media.download.authorize",
-        resource_type="media" if comparison else "download",
+        action=f"media.{operation}.authorize",
+        resource_type="download" if operation == "download" else "media",
         reason_code=reason_code,
         event=event,
         context=context,
@@ -85,6 +88,7 @@ def handler(event, context):
         return denied
     access_actor = access_auth = None
     comparison = _is_original_comparison(event)
+    printing = False
     try:
         path = (event or {}).get("pathParameters") or {}
         album_id = path.get("albumId")
@@ -97,26 +101,27 @@ def handler(event, context):
         # Validate the bounded request before looking up any album or identity.
         # Invalid public and shared requests keep the same opaque 404 response.
         body = parse_json_body(event, max_bytes=8 * 1024)
+        printing = not comparison and body.get("purpose") == "print"
         media_id = require_string(body.get("mediaId"), "mediaId", maximum=24).lower()
         if not MEDIA_ID_PATTERN.fullmatch(media_id):
             return _not_found()
 
         ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
+        operation = "print" if printing else "original_comparison" if comparison else "download"
+        kind = {"print": "print requests", "original_comparison": "comparison requests", "download": "download requests"}[operation]
+        limit = 30 if printing else 100 if album_id else 40
         if album_id:
-            action = "album_original_comparison" if comparison else "album_download"
-            if is_rate_limit_denied(f"{ip}:{album_id}", action, 100, 300):
-                _audit(event, context, "denied", "rate_limited")
-                kind = "comparison" if comparison else "download"
-                return error_response(429, f"Too many {kind} requests. Please try again later.", code="rate_limited")
+            action = f"album_{operation}"
+            if is_rate_limit_denied(f"{ip}:{album_id}", action, limit, 300):
+                _audit(event, context, "denied", "rate_limited", printing=printing)
+                return error_response(429, f"Too many {kind}. Please try again later.", code="rate_limited")
             album = get_album_record(album_id=album_id)
             if not album:
                 return _not_found()
             claims = get_verified_claims(event, required=False)
-            authorize_album(album, claims=claims)
+            access_mode = authorize_album(album, claims=claims)
             access_actor = "admin" if is_admin(claims) else "user" if claims else "anonymous"
             access_auth = "jwt" if claims else "none"
-            action = "album_original_comparison" if comparison else "album_download"
-            limit = 100
         else:
             album = get_album_record(share_code=share_code)
             if not album:
@@ -125,10 +130,11 @@ def handler(event, context):
                 # The share index can lag revocation. Recheck the current album
                 # before issuing fresh access to private original previews.
                 album = get_album_record(album_id=album["albumId"])
-            authorize_album(album, share_code=share_code)
+            access_mode = authorize_album(album, share_code=share_code)
             access_actor, access_auth = "anonymous", "share_grant"
-            action = "shared_original_comparison" if comparison else "shared_download"
-            limit = 40
+            action = f"shared_{operation}"
+        if printing and access_mode == "public":
+            return _not_found()
         image = find_image_by_media_id(album, media_id)
         if not image:
             return _not_found()
@@ -136,15 +142,23 @@ def handler(event, context):
         raw_key = validate_album_media_key(raw_key, album=album)
 
         if not check_rate_limit(f"{ip}:{album['albumId']}", action, limit, 300, fail_closed=True):
-            _audit(event, context, "denied", "rate_limited", actor_type=access_actor, auth_method=access_auth)
-            kind = "comparison" if comparison else "download"
-            return error_response(429, f"Too many {kind} requests. Please try again later.", code="rate_limited")
+            _audit(event, context, "denied", "rate_limited", actor_type=access_actor, auth_method=access_auth, printing=printing)
+            return error_response(429, f"Too many {kind}. Please try again later.", code="rate_limited")
 
         if comparison:
             metadata = load_original_comparisons_for_albums([(album, [image])])
             before = serialize_original_comparison(image, album, metadata.get(album["albumId"], {}).get(media_id))
             _audit(event, context, "success", "original_authorized", actor_type=access_actor, auth_method=access_auth)
             return json_response(200, {"before": before})
+
+        if printing:
+            if album.get("type", "photo") != "photo" or not raw_key.lower().endswith(PRINT_SOURCE_EXTENSIONS):
+                return _not_found()
+            # Sign the same edited source used for downloads. Omitting the
+            # attachment override lets Pictorem import it as an image.
+            source_url = presigned_get_url(raw_key, expiration=PRINT_SOURCE_TTL_SECONDS)
+            _audit(event, context, "success", "print_authorized", actor_type=access_actor, auth_method=access_auth, printing=True)
+            return json_response(200, {"printSourceUrl": source_url})
 
         filename = posixpath.basename(raw_key) or "download"
         expires_in = max(60, min(int(os.environ.get("MEDIA_URL_TTL_SECONDS", "600")), 3600))
@@ -157,14 +171,15 @@ def handler(event, context):
             },
         )
     except AuthError as error:
-        _audit(event, context, "denied", "access_denied", actor_type=access_actor, auth_method=access_auth)
+        _audit(event, context, "denied", "access_denied", actor_type=access_actor, auth_method=access_auth, printing=printing)
         # Share lookups never reveal whether a code exists but is inactive.
         if ((event or {}).get("pathParameters") or {}).get("shareCode"):
             return _not_found()
         return auth_error_response(error)
     except ValidationError:
-        _audit(event, context, "denied", "invalid_request", actor_type=access_actor, auth_method=access_auth)
+        _audit(event, context, "denied", "invalid_request", actor_type=access_actor, auth_method=access_auth, printing=printing)
         return _not_found()
     except Exception as error:
-        _audit(event, context, "failure", "unexpected_error", actor_type=access_actor, auth_method=access_auth)
-        return internal_error(context, error, "get_original_comparison" if comparison else "get_download_url")
+        _audit(event, context, "failure", "unexpected_error", actor_type=access_actor, auth_method=access_auth, printing=printing)
+        operation = "get_print_source" if printing else "get_original_comparison" if comparison else "get_download_url"
+        return internal_error(context, error, operation)

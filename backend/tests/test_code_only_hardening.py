@@ -14,7 +14,6 @@ import cursor_helpers
 import get_albums
 import get_download_url
 import get_public_albums
-import prepare_print
 import security_helpers
 from validation_helpers import ValidationError
 
@@ -111,7 +110,7 @@ class EarlyMediaRejectionTests(unittest.TestCase):
     def test_confirmed_blocks_skip_album_identity_and_authoritative_limiter_work(self):
         cases = [(get_download_url, "album_download", 100, {}),
                  (get_download_url, "album_original_comparison", 100, {"rawPath": f"/api/albums/{ALBUM}/original-comparison"}),
-                 (create_zip, "zip_status", 120, {}), (prepare_print, "album_print", 30, {})]
+                 (create_zip, "zip_status", 120, {})]
         for module, action, limit, extra in cases:
             with self.subTest(action=action):
                 self.block(action, limit)
@@ -132,24 +131,6 @@ class EarlyMediaRejectionTests(unittest.TestCase):
             with patch.object(get_download_url, "get_album_record", return_value=None) as album:
                 self.assertEqual(get_download_url.handler(self.event(), None)["statusCode"], 404)
                 album.assert_called_once_with(album_id=ALBUM)
-
-    def test_print_media_validation_precedes_lookup(self):
-        for media in (None, "../object", "a" * 25):
-            with self.subTest(media=media), patch.object(prepare_print, "get_album_record") as album, patch.object(prepare_print, "check_rate_limit") as rate:
-                result = prepare_print.handler(self.event(body=json.dumps({"mediaId": media})), None)
-                self.assertIn(result["statusCode"], (400, 404))
-                album.assert_not_called()
-                rate.assert_not_called()
-
-    def test_print_redemption_validates_token_before_peeking_then_skips_database(self):
-        self.block("print_redeem", 30)
-        with patch.object(prepare_print, "_verify_token", return_value={"a": ALBUM}) as verify, patch.object(prepare_print, "get_album_record") as album, patch.object(prepare_print, "_stage_print") as stage:
-            result = prepare_print.handler(self.event(rawPath="/api/print/session", body=json.dumps({"sessionToken": "signed-token"})), None)
-        self.assertEqual(result["statusCode"], 429)
-        verify.assert_called_once_with("signed-token")
-        album.assert_not_called()
-        stage.assert_not_called()
-
 
 class AnalyticsEarlyValidationTests(unittest.TestCase):
     def event(self, events):

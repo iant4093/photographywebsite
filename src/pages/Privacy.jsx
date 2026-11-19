@@ -25,7 +25,7 @@ export default function Privacy() {
     }
 
     return (
-        <LegalPage title="Privacy Notice">
+        <LegalPage title="Privacy Notice" updated="November 18, 2026">
             <section>
                 <h2>Who operates this site</h2>
                 <p>Ian Truong Photography is operated by Ian Truong, an individual photographer based in Oregon, United States. This notice covers this website, client galleries, inquiries, and the site’s print-order integration. Contact <SupportEmail subject="Privacy request" /> for privacy questions or requests.</p>
@@ -68,15 +68,15 @@ export default function Privacy() {
                     <li><a href="https://policies.google.com/privacy">Google</a> provides Drive storage for selected media backups and archives, and Gmail for correspondence.</li>
                     <li><a href="https://resend.com/legal/privacy-policy">Resend</a> delivers contact-form messages and account/gallery emails.</li>
                     <li><a href="https://www.cloudflare.com/turnstile-privacy-policy/">Cloudflare Turnstile</a> processes network and browser signals to protect forms and improve bot detection. It is loaded on protected forms, including login and contact.</li>
-                    <li><a href="https://www.fotomoto.com/help/privacy">Fotomoto/Bay Photo</a> handles optional print orders. Payment providers, such as <a href="https://stripe.com/privacy">Stripe</a> or <a href="https://www.paypal.com/us/legalhub/paypal/privacy-full">PayPal</a>, process payment information when offered and used at checkout.</li>
+                    <li><a href="https://www.pictorem.com/privacy.html">Pictorem Inc.</a> handles optional print orders on its own website. Pictorem and its payment providers handle checkout and payment processing. This site does not collect your payment-card details.</li>
                 </ul>
                 <p>I do not sell personal information or use the site’s first-party analytics for advertising across other websites. Information is disclosed to providers as needed for the activities described here, and when reasonably necessary to comply with law or protect rights and security. Public photographs are also disclosed to the audiences for which they are published.</p>
-                <p>Providers may process information in the United States and other countries where they operate. Third-party services may collect device, network, and browsing information over time or across websites under their own policies. In particular, Fotomoto’s policy describes cookies and third-party analytics/marketing tools. The site’s analytics opt-out does not control those services. Links to Instagram and GitHub take you to services with their own privacy practices.</p>
+                <p>Providers may process information in the United States and other countries where they operate. Third-party services may collect device, network, and browsing information over time or across websites under their own policies. Pictorem’s privacy policy describes cookies and third-party analytics and advertising on its website. The site’s analytics opt-out does not control those services. Links to Instagram and GitHub take you to services with their own privacy practices.</p>
             </section>
             <section>
                 <h2>Optional print ordering</h2>
-                <p>Fotomoto is not loaded during ordinary website or private-gallery browsing. When you choose “Order a Print,” an isolated print page sends Fotomoto an opaque low-resolution image reference. Private album addresses, share codes, account tokens, and original media paths are not provided to Fotomoto. If you place an order, I manually supply the corresponding print-ready file to Fotomoto. It processes product selections, contact and shipping details, order records, and device/network information; the payment provider selected in checkout processes payment details.</p>
-                <p>The low-resolution reference is scheduled for deletion after 30 days, with provider cleanup delays possible. Revoking gallery access does not immediately remove a reference already created or data already received by the print provider. See <Link to="/print-policy">print orders and returns</Link> for purchase and support information.</p>
+                <p>Choosing “Order a Print” opens Pictorem in a new tab and sends it the selected edited photo’s full-resolution file address and this site’s Pictorem account ID. Pictorem can fetch the photo and any embedded metadata before you place an order. For a private or share-code gallery, this site first verifies your access and then issues a five-minute link for that one photo. Anyone with the temporary link can use it until it expires. Your sign-in credentials, gallery share code, and other gallery photos stay on this site.</p>
+                <p>Pictorem handles product selections, contact and delivery details, billing and order information, and device and network information under its <a href="https://www.pictorem.com/privacy.html">privacy policy</a>. Orders may be associated with this site’s Pictorem account. Removing a photo here does not remove a copy or order record already held by Pictorem. See <Link to="/print-policy">Print Orders &amp; Returns</Link> for ordering and support.</p>
             </section>
             <section>
                 <h2>Retention, backups, and deletion</h2>
@@ -96,6 +96,7 @@ export default function Privacy() {
             <section>
                 <h2>Changes to this notice</h2>
                 <p>Updates are published on this page with a new revision date. Material changes will be called out here and, where required, brought to affected users’ attention through an additional website notice or direct message before the new practice takes effect. Any legally required consent will be requested separately; reading this notice is not consent.</p>
+                <p><strong>November 18, 2026.</strong> Updated the print section to explain how selected photos are sent to Pictorem and how it handles orders.</p>
                 <p>September 17, 2026: added the Oregon operator and direct contact, explained Drive backups and editor storage, clarified privacy signals and print-provider processing, and expanded the request and retention information.</p>
             </section>
         </LegalPage>

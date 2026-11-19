@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({
     fetchFeaturedPhotos: vi.fn(),
     requestAlbumMediaDownload: vi.fn(),
-    requestAlbumPrintSession: vi.fn(),
     requestAlbumOriginalComparison: vi.fn(),
 }))
 

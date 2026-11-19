@@ -49,9 +49,11 @@ export function mountLightboxMotion(dialog, config, trigger) {
 }
 
 export function requestLightboxClose(element, close) {
-    const controller = lightboxMotionControllers.get(element?.closest('.linen-lightbox'))
-    if (controller) controller.requestClose(close)
-    else close()
+    const dialog = element?.closest('.linen-lightbox')
+    const controller = lightboxMotionControllers.get(dialog)
+    if (!controller) return close()
+    dialog.dispatchEvent(new Event('lightboxclosing'))
+    controller.requestClose(close)
 }
 
 export function settleLightboxEntrance(element) {

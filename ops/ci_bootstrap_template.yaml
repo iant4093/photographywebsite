@@ -1236,21 +1236,6 @@ Resources:
                 aws:ResourceTag/Application: IanTruongPhotography
               Bool:
                 kms:GrantIsForAWSResource: 'true'
-          - Sid: ManageExactPrintSessionSecretMetadata
-            Effect: Allow
-            Action:
-              - secretsmanager:CreateSecret
-              - secretsmanager:DescribeSecret
-              - secretsmanager:GetResourcePolicy
-              - secretsmanager:ListSecretVersionIds
-              - secretsmanager:TagResource
-              - secretsmanager:UntagResource
-              - secretsmanager:UpdateSecret
-            Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:ian-photography/prod/fotomoto-print-session-*'
-          - Sid: GeneratePrintSessionSecretValue
-            Effect: Allow
-            Action: secretsmanager:GetRandomPassword
-            Resource: '*'
           - Sid: ManageApplicationLogsMetricsAndAlarms
             Effect: Allow
             Action:

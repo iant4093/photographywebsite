@@ -41,6 +41,7 @@ def get_s3_client():
         _s3 = boto3.client(
             "s3",
             config=Config(
+                signature_version="s3v4",
                 connect_timeout=3,
                 read_timeout=10,
                 max_pool_connections=16,

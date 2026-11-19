@@ -38,7 +38,6 @@ SOURCES_WorkerZipFunction := album_access.py audit_helpers.py auth_helpers.py cu
 SOURCES_DeleteImagesFunction := dynamodb_helpers.py drive_backup_jobs.py album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py delete_images.py deletion_helpers.py explore_index.py front_door.py media_access.py random_pool_refresh.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py visibility_change.py cleanup_work.py video_cleanup.py ownership_guard.py comparison_cleanup.py work_queue.py
 SOURCES_TagMediaObjectFunction := media_access.py tag_media_object.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py cache_invalidation.py response_helpers.py work_queue.py
 SOURCES_GetDownloadUrlFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_download_url.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
-SOURCES_PreparePrintFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py media_access.py prepare_print.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_UpdateImageFunction := album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py media_signing.py response_helpers.py secret_helpers.py update_image.py validation_helpers.py original_comparison_access.py random_pool_refresh.py aws_request_config.py drive_backup_jobs.py dynamodb_helpers.py media_mutation.py visibility_change.py cleanup_work.py ownership_guard.py work_queue.py
 SOURCES_GetUploadUrlFunction := audit_helpers.py auth_helpers.py front_door.py get_upload_url.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_HeroCoverFunction := audit_helpers.py auth_helpers.py front_door.py hero_cover.py hero_reel_admin.py response_helpers.py validation_helpers.py aws_request_config.py
@@ -76,7 +75,6 @@ DEPS_UpdateImageFunction := cryptography==50.0.0
 DEPS_GetAlbumsFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_CreateZipFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_GetDownloadUrlFunction := PyJWT==2.15.0 cryptography==50.0.0
-DEPS_PreparePrintFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_ContactFunction := resend==2.34.0
 DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
 DEPS_UpdateAlbumFunction := segno==1.6.6

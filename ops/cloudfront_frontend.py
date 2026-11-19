@@ -156,14 +156,6 @@ def render_csp(
     return policy
 
 
-def render_print_csp(baseline: dict[str, Any], *, media_domain: str) -> str:
-    settings = baseline.get("fotomoto_print") or {}
-    template = settings.get("content_security_policy_template")
-    if not isinstance(template, str) or "{media_origin}" not in template:
-        raise SystemExit("Refusing Fotomoto print setup: print CSP template is missing or invalid")
-    return template.format(media_origin=f"https://{media_domain}")
-
-
 def certificate_covers(hostname: str, names: list[str]) -> bool:
     hostname = hostname.lower().rstrip(".")
     for raw_name in names:
@@ -368,37 +360,6 @@ def policy_config(name: str, baseline: dict[str, Any], cache_control: str) -> di
                     "Value": "same-origin",
                     "Override": True,
                 },
-            ],
-        },
-    }
-
-
-def print_policy_config(baseline: dict[str, Any]) -> dict[str, Any]:
-    settings = baseline["fotomoto_print"]
-    return {
-        "Name": settings["response_policy_name"],
-        "Comment": "Isolated Fotomoto checkout bridge; managed in source control",
-        "SecurityHeadersConfig": {
-            "ReferrerPolicy": {"Override": True, "ReferrerPolicy": "no-referrer"},
-            "ContentSecurityPolicy": {
-                "Override": True,
-                "ContentSecurityPolicy": settings["content_security_policy"],
-            },
-            "ContentTypeOptions": {"Override": True},
-            "StrictTransportSecurity": {
-                "Override": True,
-                "AccessControlMaxAgeSec": 31536000,
-                "IncludeSubdomains": True,
-                "Preload": True,
-            },
-        },
-        "CustomHeadersConfig": {
-            "Quantity": 4,
-            "Items": [
-                {"Header": "Cache-Control", "Value": "no-cache, max-age=0, must-revalidate", "Override": True},
-                {"Header": "Permissions-Policy", "Value": settings["permissions_policy"], "Override": True},
-                {"Header": "Cross-Origin-Opener-Policy", "Value": "same-origin", "Override": True},
-                {"Header": "X-Robots-Tag", "Value": "noindex, nofollow, noarchive", "Override": True},
             ],
         },
     }
@@ -1132,7 +1093,6 @@ def main() -> int:
     parser.add_argument("--expected-etag")
     parser.add_argument("--expected-account-id")
     parser.add_argument("--include-www", action="store_true")
-    parser.add_argument("--include-fotomoto-print", action="store_true")
     parser.add_argument("--include-api-front-door", action="store_true")
     parser.add_argument("--api-certificate-arn")
     parser.add_argument("--origin-parameter-name", "--origin-secret-arn", dest="origin_parameter_name")
@@ -1178,10 +1138,6 @@ def main() -> int:
         bucket=media_bucket,
         original_preview_bucket=stack_resource(args.stack_name, "OriginalPreviewBucket", args.profile, args.region),
     )
-    if args.include_fotomoto_print:
-        baseline["fotomoto_print"]["content_security_policy"] = render_print_csp(
-            baseline, media_domain=media_distribution["DomainName"]
-        )
     current = aws_json(
         ["cloudfront", "get-distribution-config", "--id", distribution_id],
         profile=args.profile,
@@ -1333,23 +1289,6 @@ def main() -> int:
             baseline["optional_www_alias"], names
         ):
             raise SystemExit("Refusing www alias: the issued ACM certificate does not cover www")
-    if args.include_fotomoto_print:
-        certificate_arn = config.get("ViewerCertificate", {}).get("ACMCertificateArn")
-        if not certificate_arn:
-            raise SystemExit("Refusing Fotomoto print alias: distribution does not use an ACM certificate")
-        certificate_region = certificate_arn.split(":")[3]
-        certificate = aws_json(
-            ["acm", "describe-certificate", "--certificate-arn", certificate_arn, "--region", certificate_region],
-            profile=args.profile,
-        )["Certificate"]
-        certificate_names = [
-            certificate.get("DomainName", ""),
-            *(certificate.get("SubjectAlternativeNames", []) or []),
-        ]
-        if certificate.get("Status") != "ISSUED" or not certificate_covers(
-            baseline["fotomoto_print"]["alias"], certificate_names
-        ):
-            raise SystemExit("Refusing Fotomoto print alias: the issued ACM certificate does not cover it")
     if request_router_enabled:
         redirect_arn, redirect_action = ensure_www_redirect_function(
             name=redirect_name,
@@ -1384,12 +1323,6 @@ def main() -> int:
     immutable_id, immutable_action = ensure_response_policy(
         immutable_desired, apply=args.apply, profile=args.profile
     )
-    print_id = None
-    print_action = "disabled"
-    if args.include_fotomoto_print:
-        print_id, print_action = ensure_response_policy(
-            print_policy_config(baseline), apply=args.apply, profile=args.profile
-        )
     shell_cache_id, shell_cache_action = ensure_cache_policy(
         shell_cache_policy_config(baseline), apply=args.apply, profile=args.profile
     )
@@ -1404,7 +1337,6 @@ def main() -> int:
             "html": html_action,
             "static": static_action,
             "immutable": immutable_action,
-            "fotomotoPrint": print_action,
         },
         "shellCachePolicy": shell_cache_action,
         "wwwRedirect": redirect_action,
@@ -1428,8 +1360,6 @@ def main() -> int:
         return 0
 
     assert html_id and static_id and immutable_id and shell_cache_id
-    if args.include_fotomoto_print:
-        assert print_id
     # Updating an already-associated response policy can rotate the
     # distribution ETag. Refresh only after proving that the distribution
     # configuration itself is byte-for-byte equivalent after normalization;
@@ -1442,8 +1372,7 @@ def main() -> int:
     for legacy_key in ("ForwardedValues", "MinTTL", "DefaultTTL", "MaxTTL"):
         default.pop(legacy_key, None)
     # Only the default behavior uses the shell policy: every behavior derived
-    # from it below sets its own CachePolicyId, and /api/* and print.html keep
-    # the CachingDisabled "html" policy.
+    # from it below sets its own CachePolicyId.
     default.update(
         {
             "ViewerProtocolPolicy": "redirect-to-https",
@@ -1460,8 +1389,6 @@ def main() -> int:
     aliases = [baseline["canonical_alias"]]
     if args.include_www:
         aliases.append(baseline["optional_www_alias"])
-    if args.include_fotomoto_print:
-        aliases.append(baseline["fotomoto_print"]["alias"])
     desired_distribution["Aliases"] = {"Quantity": len(aliases), "Items": aliases}
 
     origin_verification_value = None
@@ -1478,8 +1405,8 @@ def main() -> int:
     existing_behaviors = desired_distribution.get("CacheBehaviors", {}).get("Items", []) or []
     managed_patterns = set(baseline["immutable_path_patterns"])
     managed_patterns.update(baseline.get("static_path_patterns", []))
-    if args.include_fotomoto_print:
-        managed_patterns.add(baseline["fotomoto_print"]["path_pattern"])
+    # The retired print document is served by the ordinary HTML behavior.
+    managed_patterns.update({"print.html", "/print.html"})
     if args.include_api_front_door:
         managed_patterns.update({
             api_settings["stats_path_pattern"],
@@ -1506,15 +1433,6 @@ def main() -> int:
         )
         for pattern in baseline.get("static_path_patterns", [])
     ]
-    print_behaviors = []
-    if args.include_fotomoto_print:
-        print_behaviors = [cache_behavior(
-            default,
-            baseline["fotomoto_print"]["path_pattern"],
-            print_id,
-            baseline,
-            cache_policy="html",
-        )]
     api_behaviors = []
     if args.include_api_front_door:
         assert public_api_cache_id and public_stats_cache_id and public_api_origin_request_id
@@ -1577,7 +1495,7 @@ def main() -> int:
     # private-media/* overlaps no other pattern; it follows the API behaviors
     # only to keep the managed order deterministic. Being managed, it is never
     # in `preserved`, so the www redirect below is not attached to it.
-    managed = api_behaviors + private_media_behaviors + print_behaviors + immutable + static
+    managed = api_behaviors + private_media_behaviors + immutable + static
     if request_router_enabled:
         for behavior in preserved:
             associate_viewer_request(behavior, redirect_arn)

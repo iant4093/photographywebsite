@@ -22,8 +22,7 @@ Before deleting gallery or account records, build a private inventory so the map
 | S3 and media delivery | Find originals, thumbnails, previews, original-comparison derivatives, ZIPs, every object version and any cached copies. Use the existing version-aware deletion and invalidation procedures, and check that public copies stop resolving. Deleting an album or media also removes its generated comparison previews; older orphans need `ops/sweep_comparison_previews.py` ([MAINTENANCE_AND_RECOVERY.md](MAINTENANCE_AND_RECOVERY.md#generated-original-comparison-cleanup)). |
 | Google Drive backups | Deleting an album does not remove its Drive backup folder. Record the verified root ancestry and IDs first. Tell synced backup copies apart from unrelated files, manual extras and archives. Remove the applicable copies as a separate step, and check Trash and old versions too. |
 | Original-comparison archives | Check these separately from the website backup root. Normal gallery-sync deletion does not touch them. Decide whether keeping the originals is necessary and legally allowed. |
-| Fotomoto references | Print redemption creates opaque preview copies under `fotomoto/references/`, which an S3 lifecycle rule expires after 30 days; provider-side cleanup may take longer. For an urgent deletion, identify the specific reference and arrange removal; revoking the gallery is not enough on its own. |
-| Fotomoto/Bay Photo and Stripe | Find the orders and print-ready uploads. Ask for deletion or correction where it applies, and separate fulfillment copies from records the vendor has to keep. Record confirmations and exceptions. Never email card details. |
+| Pictorem | Check any order information visible in the Pictorem account. For information or files held by Pictorem, direct the requester to its [privacy contact](https://www.pictorem.com/privacy.html) and coordinate where applicable. Removing the source image on this site does not remove provider copies. Record confirmations and exceptions. Never email card details. |
 | Gmail and Resend | Find the inquiry, correspondence, sent copies, delivery records and Trash. Keep only what a documented exception needs. |
 | Logs and recovery backups | Check the retention that is actually configured, who can access it, and any incident or legal holds. Where allowed, let protected backups expire, and keep a minimal suppression record so a restore does not bring deleted information back. |
 
@@ -39,7 +38,7 @@ Close a case only after the applicable actions are done, or after explaining any
 
 ## Routine retention review
 
-Periodically review old inquiry threads, unused client accounts, expired delivery galleries, backups and archives, and closed cases. Record the decisions privately. Check the live log settings before stating any retention number; a template default does not prove what is deployed. Analytics counters have a 400-day TTL and Fotomoto references expire after 30 days; the services can take additional time to remove expired items. Recheck those values when the infrastructure changes.
+Periodically review old inquiry threads, unused client accounts, expired delivery galleries, backups and archives, and closed cases. Record the decisions privately. Check the live log settings before stating any retention number; a template default does not prove what is deployed. Analytics counters have a 400-day TTL. The service can take additional time to remove expired items. Recheck those values when the infrastructure changes.
 
 ## Case record fields (private storage only)
 

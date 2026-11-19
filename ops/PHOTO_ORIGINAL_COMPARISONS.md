@@ -176,7 +176,7 @@ commands, reports or this runbook.
 
 Fill in the shell variables below from current, checked metadata, including
 the frontend origin and distribution ETag. The example keeps the `www`,
-print-store, API, social-router and signed-cookie private-media features. See
+API, social-router and signed-cookie private-media features. See
 [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md): once the private-media viewer-request
 function is attached, the helper refuses a run that leaves out
 `--include-private-media`. Confirm the live aliases and feature set before
@@ -188,7 +188,6 @@ originals_edge_args=(
   --stack-name ian-website
   --region us-west-2
   --include-www
-  --include-fotomoto-print
   --include-api-front-door
   --api-certificate-arn "$originals_api_certificate_arn"
   --origin-parameter-name "$originals_origin_parameter_name"
@@ -254,7 +253,7 @@ been applied.
   lightbox has been open for a long time.
 - Check that video albums show no Before/After action and queue no original
   work. After the edge update, check CSP, canonical and `www` redirects, the
-  print-store entry, public social metadata, sign-in and direct-origin denial.
+  Pictorem print link, public social metadata, sign-in and direct-origin denial.
 
 ## Failure recovery and retention
 

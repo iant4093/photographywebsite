@@ -148,6 +148,55 @@ class DownloadTests(unittest.TestCase):
             response = get_download_url.handler(event, None)
         self.assertEqual(response["statusCode"], 404)
 
+    def test_protected_print_signs_only_the_selected_full_resolution_file(self):
+        code = "share-code-123"
+        for album, identity, path in (
+            ({"visibility": "private", "ownerSub": "owner"}, claims(subject="owner"), {"albumId": ALBUM_ID}),
+            ({"visibility": "unlisted", "isShared": True, "shareCode": code}, None, {"shareCode": code}),
+        ):
+            record = {**self.album, **album, "images": [{
+                "rawKey": RAW_KEY,
+                "thumbKey": f"albums/{ALBUM_ID}/thumbs/photo.webp",
+            }]}
+            event = {**self._event(), "pathParameters": path, "body": json.dumps({
+                "mediaId": MEDIA_ID, "purpose": "print", "key": "ignored",
+            })}
+            with self.subTest(path=path), patch.object(
+                get_download_url, "get_album_record", return_value=record
+            ), patch.object(get_download_url, "get_verified_claims", return_value=identity), patch.object(
+                get_download_url, "check_rate_limit", return_value=True
+            ), patch.object(get_download_url, "presigned_get_url", return_value="https://signed.example") as sign:
+                response = get_download_url.handler(event, None)
+                self.assertEqual(response["statusCode"], 200)
+                self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+                self.assertEqual(response_body(response), {"printSourceUrl": "https://signed.example"})
+                sign.assert_called_once_with(RAW_KEY, expiration=300)
+
+    def test_print_never_signs_for_revoked_access_or_ineligible_media(self):
+        code = "share-code-123"
+        private = {**self.album, "visibility": "private", "ownerSub": "owner"}
+        video_key = f"albums/{ALBUM_ID}/original/movie.mp4"
+        for record, identity, path, media_id, expected in (
+            (private, None, {"albumId": ALBUM_ID}, MEDIA_ID, 401),
+            (private, claims(subject="other"), {"albumId": ALBUM_ID}, MEDIA_ID, 403),
+            ({**private, "visibility": "unlisted", "isShared": False, "shareCode": code}, None, {"shareCode": code}, MEDIA_ID, 404),
+            ({**private, "visibility": "unlisted", "isShared": True, "shareCode": "new-code-123"}, None, {"shareCode": code}, MEDIA_ID, 404),
+            (self.album, None, {"shareCode": code}, MEDIA_ID, 404),
+            (private, claims(subject="owner"), {"albumId": ALBUM_ID}, "0" * 24, 404),
+            ({**private, "type": "video", "images": [{"rawKey": video_key}]}, claims(subject="owner"),
+             {"albumId": ALBUM_ID}, media_access.media_id_for_key(video_key), 404),
+        ):
+            event = {**self._event(), "pathParameters": path, "body": json.dumps({
+                "mediaId": media_id, "purpose": "print",
+            })}
+            with self.subTest(path=path, status=expected), patch.object(
+                get_download_url, "get_album_record", return_value=record
+            ), patch.object(get_download_url, "get_verified_claims", return_value=identity), patch.object(
+                get_download_url, "check_rate_limit", return_value=True
+            ), patch.object(get_download_url, "presigned_get_url") as sign:
+                self.assertEqual(get_download_url.handler(event, None)["statusCode"], expected)
+                sign.assert_not_called()
+
 
 class AbuseProtectionTests(unittest.TestCase):
     def setUp(self):

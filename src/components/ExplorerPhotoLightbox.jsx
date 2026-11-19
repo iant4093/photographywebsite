@@ -4,6 +4,7 @@ import { requestLightboxClose } from '../utils/lightboxMotionControl'
 import PhotoLightboxNavigation from './PhotoLightboxNavigation'
 import PhotoZoomFrame from './PhotoZoomFrame'
 import LightboxShareButton from './LightboxShareButton'
+import LightboxPrintLink from './LightboxPrintLink'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import usePhotoPreview from '../hooks/usePhotoPreview'
 import { loadExplorerViewer, readExplorerViewer } from '../utils/explorerViewer'
@@ -22,7 +23,6 @@ const ACTION_CLASS = 'inline-flex items-center gap-2 rounded-full border border-
 export default function ExplorerPhotoLightbox(props) {
     const [state, setState] = useState(() => ({ Viewer: readExplorerViewer(), error: false, attempt: 0 }))
     const [Viewer, setViewer] = useState(() => readExplorerViewer())
-    const [printing, setPrinting] = useState(false)
     const [comparison, setComparison] = useState({ id: null, requested: false, ready: null })
     const closeControl = useRef(null)
     const focusedLabel = useRef(null)
@@ -79,7 +79,7 @@ export default function ExplorerPhotoLightbox(props) {
         if (!dialog) return undefined
         let timer
         const promote = () => {
-            if (dialog.hasAttribute('inert') || printing || pointerDown.current || outgoing
+            if (dialog.hasAttribute('inert') || pointerDown.current || outgoing
                 || dialog.querySelector('.is-zoomed, .is-panning')
                 || dialog.querySelector('.linen-lightbox-share')?.textContent.includes('Link Copied')) return
             if (Date.now() - lastInput.current < 200) { schedule(); return }
@@ -104,10 +104,9 @@ export default function ExplorerPhotoLightbox(props) {
             dialog.removeEventListener('pointerup', schedule)
             dialog.removeEventListener('keyup', schedule)
         }
-    }, [state.Viewer, Viewer, printing, outgoing, image])
+    }, [state.Viewer, Viewer, outgoing, image])
 
-    // Keep the existing bounded original-status cadence if an active zoom or
-    // print checkout deliberately postpones the non-disruptive enhancement.
+    // Keep refreshing the original status while an active zoom delays the viewer handoff.
     useEffect(() => {
         if (Viewer || !comparisonRequested || !['unresolved', 'pending'].includes(image?.before?.status)) return undefined
         let active = true, timer
@@ -159,7 +158,7 @@ export default function ExplorerPhotoLightbox(props) {
             onPrevious={props.images.length > 1 ? props.onPrevious : undefined}
             className={`${Viewer ? '' : 'explorer-viewer-pending'} linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0`}
         >
-            {Viewer ? <Viewer {...props} embedded initialFocusRef={closeControl} printingState={[printing, setPrinting]}
+            {Viewer ? <Viewer {...props} embedded initialFocusRef={closeControl}
                 initialImageReady={imageId !== null && readyImage === imageId}
                 initialComparisonRequested={comparisonRequested} initialOriginalReady={originalReady && Boolean(beforeUrl)} /> : <>
             <button ref={closeControl} type="button" onClick={props.onClose} aria-label="Close photo viewer" title="Close Photo Viewer"
@@ -184,6 +183,7 @@ export default function ExplorerPhotoLightbox(props) {
                             style={PHOTO_STYLE} />}
                         <PhotoZoomFrame key={imageId} bounds={bounds} loaded={readyImage === imageId} visible={!showingBefore}
                             src={mediaDisplayUrl(image)} srcSet={mediaPreviewSrcSet(image) || undefined}
+                            fullResolutionSrc={image.downloadUrl}
                             sizes={sizesFor(image)} width={image.width} height={image.height} decoding="async" fetchPriority="high"
                             alt={photoDescription(image, props.ariaLabel, props.index, props.images.length)}
                             className={`linen-lightbox-photo linen-lightbox-edited object-contain relative z-30 ${readyImage === imageId ? 'is-loaded' : ''}`}
@@ -235,13 +235,7 @@ export default function ExplorerPhotoLightbox(props) {
                             aria-label={showingBefore ? 'Download edited photo' : 'Download photo'}>
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg><span>Download</span>
                         </button>}
-                        {props.onPrint && <button type="button" disabled={printing} onClick={async event => {
-                            event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); setPrinting(true)
-                            try { await props.onPrint(event, image, props.index) } finally { setPrinting(false) }
-                        }} className={`linen-lightbox-print ${ACTION_CLASS} disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation`}
-                            aria-label={showingBefore ? 'Order a print of the edited photo' : 'Order a print of this photo'}>
-                            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" /></svg><span>{printing ? 'Preparing…' : 'Order a Print'}</span>
-                        </button>}
+                        {props.publicPrint && <LightboxPrintLink photo={image} showingBefore={showingBefore} />}
                     </div>
                     {hasComparison && <span className="linen-lightbox-before-status" role="status" aria-live="polite">{showingBefore ? 'Before — Camera JPG' : 'After — Edited'}{beforeMessage ? `. ${beforeMessage}` : ''}</span>}
                     <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">{props.index + 1} / {props.images.length}</span>

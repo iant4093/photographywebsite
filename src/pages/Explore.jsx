@@ -4,7 +4,7 @@ import { lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { Link, useLocation, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
-import { requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
+import { requestAlbumMediaDownload } from '../utils/api'
 import {
     createExploreSeed,
     fetchExploreColors,
@@ -31,7 +31,6 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import './Explore.css'
-import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForAlbumPhoto } from '../utils/share'
 import { saveVerticalScroll } from '../utils/scroll'
 import { EXPLORE_MODULES } from '../utils/exploreModules'
@@ -515,17 +514,6 @@ function ExploreModule({ mode }) {
         }
     }, [])
 
-    const handlePrint = useCallback(async (event, image) => {
-        event.stopPropagation()
-        const returnFocusTo = event.currentTarget
-        try {
-            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)), returnFocusTo)
-        } catch (error) {
-            console.error('Explore print order failed:', error)
-            alert(error?.message || 'The print store could not be opened. Please try again.')
-        }
-    }, [])
-
     const activeLabel = isColor ? COLOR_BY_ID.get(value)?.label : value
     const availableColors = isColor
         ? facets.map(option => ({ ...COLOR_BY_ID.get(option.id), ...option })).filter(option => option.id && option.label)
@@ -606,7 +594,7 @@ function ExploreModule({ mode }) {
                     onNext={() => setLightboxIndex(current => (current + 1) % items.length)}
                     onPrevious={() => setLightboxIndex(current => (current - 1 + items.length) % items.length)}
                     onDownload={handleDownload}
-                    onPrint={handlePrint}
+                    publicPrint
                     onBeforeRefresh={refreshOriginal}
                     shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
                 />
@@ -979,17 +967,6 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
         }
     }, [])
 
-    const handlePrint = useCallback(async (event, image) => {
-        event.stopPropagation()
-        const returnFocusTo = event.currentTarget
-        try {
-            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)), returnFocusTo)
-        } catch (error) {
-            console.error('Explore print order failed:', error)
-            alert(error?.message || 'The print store could not be opened. Please try again.')
-        }
-    }, [])
-
     if (index === null || !images[index]) return null
     return (
         <PhotoLightbox
@@ -1000,7 +977,7 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
             onNext={() => setIndex(current => (current + 1) % images.length)}
             onPrevious={() => setIndex(current => (current - 1 + images.length) % images.length)}
             onDownload={handleDownload}
-            onPrint={handlePrint}
+            publicPrint
             onBeforeRefresh={refreshOriginal}
             shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
             shareTitle="Ian Truong Photography"

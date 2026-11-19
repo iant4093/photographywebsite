@@ -388,7 +388,6 @@ class ReleaseIntentTests(unittest.TestCase):
                 "AlbumUsageFunctionRole",
                 "PreviewWorkerFunctionRole",
                 "TagMediaObjectFunctionRole",
-                "PreparePrintFunctionRole",
                 "RefreshGoogleDriveUsageFunctionRole",
                 "RandomPhotoPoolBuilderFunctionRole",
                 "HoverPreviewManifestBuilderFunctionRole",
@@ -522,12 +521,6 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("PrivateMediaCachePolicy", "AWS::CloudFront::CachePolicy"),
                 ("PrivateMediaResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
                 ("PrivateMediaRewriteFunction", "AWS::CloudFront::Function"),
-                ("PrintSessionSecret", "AWS::SecretsManager::Secret"),
-                ("PreparePrintFunction", "AWS::Lambda::Function"),
-                ("PreparePrintFunctionRole", "AWS::IAM::Role"),
-                ("PreparePrintFunctionAlbumPrintSessionPermission", "AWS::Lambda::Permission"),
-                ("PreparePrintFunctionSharedPrintSessionPermission", "AWS::Lambda::Permission"),
-                ("PreparePrintFunctionRedeemPrintSessionPermission", "AWS::Lambda::Permission"),
                 ("GitHubAnalyticsCacheTable", "AWS::DynamoDB::Table"),
                 ("GetGitHubAnalyticsFunction", "AWS::Lambda::Function"),
                 ("GetGitHubAnalyticsFunctionRole", "AWS::IAM::Role"),
@@ -593,7 +586,34 @@ class ReleaseIntentTests(unittest.TestCase):
                 self.assertEqual(rule["propertyPaths"], [])
                 self.assertTrue(rule["allowNoDetails"])
 
-        self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))
+        self.assertEqual(
+            {(rule["logicalId"], rule["resourceType"]) for rule in document["rules"] if rule["action"] == "Remove"},
+            set(release_guard.PRINT_REMOVALS),
+        )
+
+    def test_print_removal_requires_exact_intent_and_confirmed_secret_retention(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        resources = [
+            {"Action": "Remove", "LogicalResourceId": logical_id, "ResourceType": resource_type, "PolicyAction": policy}
+            for (logical_id, resource_type), policy in release_guard.PRINT_REMOVALS.items()
+        ]
+        result = release_guard.gate_change_set(
+            [{"Changes": [{"ResourceChange": resource} for resource in resources]}], release_intent=intent
+        )
+        self.assertEqual(result["Remove"], 6)
+        secret = next(resource for resource in resources if resource["PolicyAction"] == "Retain")
+        for resource in (
+            secret | {"PolicyAction": "Delete"},
+            {key: value for key, value in secret.items() if key != "PolicyAction"},
+            secret | {"LogicalResourceId": "RateLimitHashSecret"},
+            secret | {"ResourceType": "AWS::DynamoDB::Table"},
+        ):
+            with self.subTest(resource=resource), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set([{"Changes": [{"ResourceChange": resource}]}], release_intent=intent)
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set([{"Changes": [{"ResourceChange": secret}]}])
 
     def test_private_media_edge_release_is_bounded_to_reviewed_changes(self):
         intent = release_guard.load_release_intent(json.loads(

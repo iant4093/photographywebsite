@@ -60,6 +60,7 @@ function fixture(count) {
         albumId: items[0].albumId, albumTitle: 'Fixture photographs', altText: `Fixture photograph ${index + 1}`,
         url: `https://${mediaDomain}/photos/photo-${index}-w1920.webp`,
         thumbnailUrl: `https://${mediaDomain}/photos/photo-${index}-w640.webp`,
+        downloadUrl: `https://${mediaDomain}/albums/${items[0].albumId}/original/photo-${index}.jpg`,
         width: 1920, height: 1280, isFavorite: true,
         before: { status: 'unavailable' },
         exif: { model: 'Fixture Camera', lens: 'Fixture Lens', focalLength: '50 mm', focalRatio: 'f/2.8', shutterSpeed: '1/250', iso: '100' },
@@ -89,7 +90,7 @@ await generation.close()
 const images = Object.fromEntries(Object.entries(encoded).map(([width, bytes]) => [width, Buffer.from(bytes)]))
 fixtureDownload = images[1920]
 
-async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, failModule = false, imageDelay = 0, titleSuffix = '' }) {
+async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, failModule = false, imageDelay = 0, detailDelay = 0, titleSuffix = '' }) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: width < 500 ? 3 : 1,
         ...(engine !== 'firefox' ? { isMobile: width < 500, hasTouch: width < 500 } : {}), serviceWorkers: 'block' })
     const data = fixture(count), traffic = [], errors = []
@@ -111,13 +112,12 @@ async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, 
         if (url.pathname.startsWith(apiPrefix + '/') || url.pathname.includes('/public/')) {
             const headers = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,HEAD,POST,OPTIONS', 'access-control-allow-headers': '*' }
             if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
-            if (!['GET', 'HEAD', 'POST'].includes(request.method()) || (request.method() === 'POST' && !/\/(download-url|print|original-comparison)$/.test(url.pathname))) {
+            if (!['GET', 'HEAD', 'POST'].includes(request.method()) || (request.method() === 'POST' && !/\/(download-url|original-comparison)$/.test(url.pathname))) {
                 errors.push(`Blocked unexpected API action: ${request.method()} ${url.pathname}`)
                 return route.abort()
             }
             let body = { items: [], images: [], nextCursor: null }
             if (url.pathname.endsWith('/download-url')) body = { downloadUrl: origin + '/fixture-download.webp' }
-            else if (url.pathname.endsWith('/print')) body = { sessionToken: 'fixture-'.repeat(16) }
             else if (url.pathname.includes('/random-photos') || url.pathname.includes('/featured-photos')) body = { images: data.photos, totalPhotos: 6 }
             else if (/\/public\/albums\/[^/]+$/.test(url.pathname)) {
                 const album = data.items.find(item => item.albumId === url.pathname.split('/').pop()) || data.items[0]
@@ -132,7 +132,12 @@ async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, 
             return route.fulfill({ contentType: 'application/json', headers, body: JSON.stringify(body) })
         }
         if (url.origin === origin && url.pathname === '/fixture-download.webp') return route.continue()
-        if (request.resourceType() === 'document' && url.origin !== origin && url.pathname === '/print.html') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Fixture checkout</title><h1>Fixture print options</h1>' })
+        if (request.resourceType() === 'document' && url.origin === 'https://www.pictorem.com' && url.pathname === '/order.html') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Fixture checkout</title><h1>Fixture print options</h1>' })
+        if (url.protocol === 'blob:') return route.continue()
+        if (url.hostname === mediaDomain && /\/original\/photo-\d+\.jpg$/.test(url.pathname)) {
+            if (detailDelay) await new Promise(done => setTimeout(done, detailDelay))
+            return route.fulfill({ contentType: 'image/webp', headers: { 'access-control-allow-origin': '*' }, body: images[1920] }).catch(() => {})
+        }
         if (request.resourceType() === 'image') {
             if (imageDelay) await new Promise(done => setTimeout(done, imageDelay))
             const width = Number(url.pathname.match(/-w(\d+)/)?.[1] || url.pathname.match(/hero-(\d+)/)?.[1] || 640)
@@ -165,6 +170,40 @@ async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, 
     await page.locator('.catalog-section .album-card').first().waitFor()
     await page.waitForTimeout(1800)
     return { context, page, traffic, errors, cdp }
+}
+
+async function photoDetailCase(width) {
+    const { context, page, traffic, errors } = await openCase({ width, detailDelay: 1800 })
+    try {
+        const albumId = '11111111-1111-4111-8111-000000000001'
+        const photoId = fixture(1).photos[0].id
+        const photo = page.locator('.linen-lightbox-photo-frame.is-loaded:not(.is-outgoing) img.linen-lightbox-edited')
+        await page.goto(origin + '/album/' + albumId + '?photo=' + photoId)
+        await photo.waitFor()
+        // The next photo starts downloading on dwell. Leaving that photo
+        // should stop the transfer and the third should upgrade on its own.
+        const detailRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/original/photo-1.jpg'))
+        await page.keyboard.press('ArrowRight')
+        const request = await detailRequest
+        assert.equal(request.resourceType(), 'fetch')
+        assert.equal(traffic.some(entry => entry.path.endsWith('/original/photo-0.jpg')), false)
+        const aborted = page.waitForEvent('requestfailed', { predicate: failed => failed.url() === request.url() })
+        await page.keyboard.press('ArrowRight')
+        await aborted
+        await photo.and(page.locator('[src^="blob:"]:not([srcset])')).waitFor()
+        const target = await photo.evaluate(async image => {
+            await image.decode()
+            const rect = image.getBoundingClientRect()
+            return {
+                hit: document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === image,
+                width: image.naturalWidth,
+            }
+        })
+        assert.deepEqual(target, { hit: true, width: 1920 }, 'The full-resolution file must be the image under the pointer')
+        assert.deepEqual(errors, [])
+        const result = { engine, width, check: 'photo dwell upgrades the save target and aborts skipped transfers', passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
+    } finally { await context.close() }
 }
 
 async function performanceCase(options) {
@@ -316,7 +355,8 @@ async function viewerCase(width, failModule = false, kind = 'random') {
         await dialog.waitFor()
         await page.getByRole('img', { name: 'Fixture photograph 1', exact: true }).waitFor()
         await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] img')].some(image => image.complete && image.naturalWidth > 0))
-        const pendingBounds = await page.getByRole('img', { name: 'Fixture photograph 1', exact: true }).boundingBox()
+        const frame = dialog.locator('.linen-lightbox-photo-frame:not(.is-outgoing):not(.is-hidden)')
+        const pendingBounds = await frame.boundingBox()
         assert.equal(await page.getByRole('button', { name: 'Close photo viewer', exact: true }).evaluate(node => node === document.activeElement), true)
         await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowLeft')
         if (!failModule && kind === 'featured') {
@@ -344,17 +384,18 @@ async function viewerCase(width, failModule = false, kind = 'random') {
             await page.getByRole('button', { name: 'Download photo', exact: true }).click()
             assert.equal(await (await downloadPromise).failure(), null)
             assert.equal(await page.locator('.explorer-viewer-pending').count(), 1, 'Print must exercise the cold-code path')
-            await page.getByRole('button', { name: 'Order a print of this photo', exact: true }).click()
-            await page.getByRole('dialog', { name: 'Print options', exact: true }).waitFor()
-            await page.waitForTimeout(3250)
-            assert.equal(await page.getByRole('dialog', { name: 'Print options', exact: true }).isVisible(), true)
-            await page.getByRole('button', { name: 'Close print options', exact: true }).click()
-            // The host closes through a separate React root. Check the
-            // completed close and its focus restoration, rather than racing
-            // that root's effect cleanup immediately after the click.
-            await page.getByRole('dialog', { name: 'Print options', exact: true }).waitFor({ state: 'hidden' })
-            await page.waitForFunction(() => document.querySelector('.linen-lightbox-print') === document.activeElement, null, { timeout: 2000 })
-            assert.equal(traffic.filter(request => request.path.endsWith('/print')).length, 1)
+            const printLink = page.getByRole('link', { name: 'Order a print of this photo', exact: true })
+            const expectedCheckout = await printLink.getAttribute('href')
+            const popup = page.waitForEvent('popup')
+            await printLink.click()
+            const orderPage = await popup
+            await orderPage.getByRole('heading', { name: 'Fixture print options' }).waitFor()
+            assert.equal(orderPage.url(), expectedCheckout)
+            const checkout = new URL(orderPage.url())
+            assert.equal(checkout.searchParams.get('apiid'), 'HQ1RAJ10HOD')
+            assert.match(checkout.searchParams.get('import'), /\/albums\/.+\/original\/photo-\d+\.jpg$/)
+            await orderPage.close()
+            assert.equal(await page.getByRole('dialog').isVisible(), true)
         }
         if (failModule) {
             await page.getByRole('alert').filter({ hasText: 'Photo controls could not be loaded' }).waitFor()
@@ -362,7 +403,7 @@ async function viewerCase(width, failModule = false, kind = 'random') {
         }
         await page.locator('.explorer-viewer-pending').waitFor({ state: 'hidden' })
         await page.getByRole('button', { name: 'Download photo', exact: true }).waitFor()
-        const readyBounds = await page.locator('.linen-lightbox-edited').boundingBox()
+        const readyBounds = await frame.boundingBox()
         for (const dimension of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(pendingBounds[dimension] - readyBounds[dimension]) <= 2, `Photo ${dimension} shifted on viewer handoff`)
         for (let step = 0; step < 12; step++) await page.keyboard.press(step % 2 ? 'ArrowLeft' : 'ArrowRight')
         await page.keyboard.press('Tab')
@@ -1738,6 +1779,7 @@ try {
             continue
         }
         if (process.env.VISITOR_VIEWERS_ONLY === '1') {
+            await photoDetailCase(width)
             await viewerCase(width)
             await viewerCase(width, true)
             await viewerCase(width, false, 'featured')
@@ -1763,6 +1805,7 @@ try {
         if (width >= 1080) await routeTimelineLandingCase(width)
         await calendarYearCase(width)
         await lightboxStabilityCase(width)
+        await photoDetailCase(width)
         await viewerCase(width)
         await viewerCase(width, true)
         await viewerCase(width, false, 'featured')

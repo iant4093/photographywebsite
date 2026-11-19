@@ -67,7 +67,6 @@
     "OriginalIndexRefreshFunction": "original-comparisons",
     "OriginalPreviewBucket": "original-comparisons",
     "PreTokenGenerationFunction": "identity",
-    "PreparePrintFunction": "public-delivery",
     "PreviewDeadLetterQueue": "shared-platform",
     "PreviewMetadataTable": "shared-platform",
     "PreviewQueue": "shared-platform",

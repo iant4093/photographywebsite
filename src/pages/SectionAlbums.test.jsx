@@ -13,7 +13,6 @@ const api = vi.hoisted(() => ({
     fetchFeaturedPhotos: vi.fn(),
     fetchRandomPhotos: vi.fn(),
     requestAlbumMediaDownload: vi.fn(),
-    requestAlbumPrintSession: vi.fn(),
     requestAlbumOriginalComparison: vi.fn(),
 }))
 vi.mock('../utils/api', () => api)

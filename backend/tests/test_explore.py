@@ -152,7 +152,7 @@ class ExploreApiTests(unittest.TestCase):
         self.assertNotIn("gps", item["exif"])
         self.assertIn("/public-previews/", item["url"])
         self.assertNotIn("rawKey", item)
-        self.assertNotIn("downloadUrl", item)
+        self.assertEqual(item["downloadUrl"], f"https://media.example.test/albums/{ALBUM_ID}/original/photo.jpg")
 
     def test_current_album_visibility_is_authoritative(self):
         with patch.object(

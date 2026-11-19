@@ -9,6 +9,7 @@ import {
     mediaPreviewSrcSet,
 } from '../utils/mediaUrls'
 import LightboxShareButton from './LightboxShareButton'
+import LightboxPrintLink from './LightboxPrintLink'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import usePhotoPreview from '../hooks/usePhotoPreview'
 import PhotoZoomFrame from './PhotoZoomFrame'
@@ -73,7 +74,8 @@ function PhotoLightbox({
     onPrevious,
     onRetry,
     onDownload,
-    onPrint,
+    publicPrint = false,
+    requestPrintSource,
     canShare = true,
     shareTitle,
     shareUrl,
@@ -89,11 +91,8 @@ function PhotoLightbox({
     initialOriginalReady = false,
     embedded = false,
     initialFocusRef,
-    printingState,
 }) {
     const { containerRef, sizesFor, bounds } = useContainedImageSizes()
-    const [internalPrinting, setInternalPrinting] = useState(false)
-    const [printing, setPrinting] = printingState || [internalPrinting, setInternalPrinting]
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
     // An explorer's small loading dialog may already have displayed this exact
@@ -238,18 +237,6 @@ function PhotoLightbox({
             markImageReady(url)
             setPreview(current => current.id === activeId ? { ...current, ready } : current)
         }, onMediaError)
-    }
-
-    const handlePrint = async (event) => {
-        event.stopPropagation()
-        if (!onPrint || !activeImage || printing) return
-        if (embedded) event.currentTarget?.focus({ preventScroll: true })
-        setPrinting(true)
-        try {
-            await onPrint(event, activeImage, index)
-        } finally {
-            setPrinting(false)
-        }
     }
 
     const refreshOriginal = (event, allowMediaError = false, isRetry = false) => {
@@ -400,6 +387,7 @@ function PhotoLightbox({
                                 loaded={loadedImageId === activeId}
                                 visible={!showingBefore}
                                 src={activeRawUrl}
+                                fullResolutionSrc={activeImage.downloadUrl}
                                 fetchPriority="high"
                                 srcSet={previewSrcSet || undefined}
                                 sizes={sizesFor(activeImage)}
@@ -535,19 +523,9 @@ function PhotoLightbox({
                                     <span>Download</span>
                                 </button>
                             )}
-                            {!adminMode && onPrint && (
-                                <button
-                                    type="button"
-                                    onClick={handlePrint}
-                                    disabled={printing}
-                                    className="linen-lightbox-print inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation"
-                                    aria-label={showingBefore ? 'Order a print of the edited photo' : 'Order a print of this photo'}
-                                >
-                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" />
-                                    </svg>
-                                    <span>{printing ? 'Preparing…' : 'Order a Print'}</span>
-                                </button>
+                            {!adminMode && (publicPrint || requestPrintSource) && (
+                                <LightboxPrintLink key={activeId} photo={activeImage} showingBefore={showingBefore}
+                                    requestPrintSource={requestPrintSource} />
                             )}
                         </div>
                         {!adminMode && hasOriginalComparison && (beforeHasError || beforeUnavailable) && (

@@ -3,7 +3,7 @@ import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router'
-import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload, requestSharedPrintSession } from '../utils/api'
+import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoLightbox from '../components/VideoLightbox'
 import { motion } from 'framer-motion'
@@ -24,7 +24,6 @@ import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import PhotoLightbox from '../components/PhotoLightbox'
-import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForPathPhoto, shareUrlForPathVideo } from '../utils/share'
 import { handlePointerTilt } from '../utils/pointerTilt'
 
@@ -132,6 +131,8 @@ export default function SharedAlbum({ theme = 'light' }) {
         })
     }, [location.pathname, location.search, navigate, sharedMediaId, resetLightbox])
 
+    const requestPrintSource = image => requestSharedMediaDownload(code, mediaId(image), { forPrint: true })
+
     // Download a single image
     const downloadImage = async (e) => {
         e.stopPropagation()
@@ -147,18 +148,6 @@ export default function SharedAlbum({ theme = 'light' }) {
         } catch (err) {
             console.error('Download failed:', err)
             alert('The file could not be downloaded. Please try again.')
-        }
-    }
-
-    const printImage = async (event, image) => {
-        event.stopPropagation()
-        if (!image) return
-        const returnFocusTo = event.currentTarget
-        try {
-            await openPrintOrder(() => requestSharedPrintSession(code, mediaId(image)), returnFocusTo)
-        } catch (printError) {
-            console.error('Print order failed:', printError)
-            alert(printError?.message || 'The print store could not be opened. Please try again.')
         }
     }
 
@@ -455,7 +444,7 @@ export default function SharedAlbum({ theme = 'light' }) {
                     onNext={goNext}
                     onPrevious={goPrev}
                     onDownload={downloadImage}
-                    onPrint={printImage}
+                    requestPrintSource={requestPrintSource}
                     shareTitle={`${album.title} — Ian Truong Photography`}
                     shareUrl={image => shareUrlForPathPhoto(location.pathname, mediaId(image))}
                     onBeforeRefresh={refreshOriginal}

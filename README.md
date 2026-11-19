@@ -79,7 +79,7 @@ The frontend is a React single-page app served through CloudFront. The API is a 
 - Photo and video albums with blurhash placeholders, responsive WebP previews from 640 to 1920 px, and adaptive HLS video
 - Explore section: a walkable 3D gallery (react-three-fiber), browsing by color, lens, exposure, time of day and season, and a "Guess the Settings" game
 - Search, a stats page with a shooting-day calendar, random and featured photos, and a TV slideshow mode with Chromecast support
-- Print store, and a contact form protected by Cloudflare Turnstile
+- Pictorem print ordering for eligible photographs and a contact form protected by Cloudflare Turnstile
 - Installable PWA, and link previews for public photo and video albums
 
 **Clients**
@@ -140,13 +140,13 @@ The [Miro architecture board](https://miro.com/app/board/uXjVEYlOMic=/) has thre
 | Backend | Python 3.12 on Lambda (AWS SAM), boto3, PyJWT, Pillow, Google API client; Node.js 22 and Sharp for previews; ffmpeg for the hero reel |
 | AWS | API Gateway, Lambda, Cognito, DynamoDB, S3, CloudFront and CloudFront Functions, WAF, Route 53, ACM, SQS, EventBridge, MediaConvert, SSM Parameter Store, Secrets Manager, KMS |
 | Monitoring and security | CloudWatch, X-Ray, SNS, CloudTrail, AWS Config, GuardDuty, Security Hub, IAM Access Analyzer, AWS Backup, AWS Budgets |
-| Third-party services | Cloudflare Turnstile, Resend, Google Drive, GitHub API, Fotomoto, Google Cast |
+| Third-party services | Cloudflare Turnstile, Resend, Google Drive, GitHub API, Pictorem, Google Cast |
 | Testing and CI | Vitest, Testing Library, Playwright, Node.js test runner, Python `unittest` with moto and coverage.py, ESLint, cfn-lint, actionlint, zizmor, CodeQL, pip-audit, npm audit, CycloneDX SBOMs, GitHub artifact attestations |
 
 ## Build and release
 
 - GitHub Actions authenticates to AWS with OIDC. Only the `main` branch of this repository can assume the deploy roles, and no AWS keys are stored in GitHub.
-- One role plans the CloudFormation change set and a separate role executes it. A release guard checks the plan and stops the release on any resource removal or replacement, and on changes to protected resources that are not approved in [`ops/ci/release_intent.json`](ops/ci/release_intent.json).
+- One role plans the CloudFormation change set and a separate role executes it. A release guard checks replacements, removals, and protected resources against the [release rules](ops/CI_CD.md#how-a-main-release-deploys) and [versioned intent](ops/ci/release_intent.json).
 - Each Lambda is packaged from an explicit list of source files ([`backend/Makefile`](backend/Makefile)), and build output is scanned for credentials.
 - Release artifacts get checksums, CycloneDX SBOMs and signed build provenance.
 - GitHub Actions are pinned to commit SHAs. The quality gate on pull requests and releases runs CodeQL and a scan of the full git history for secrets. Pull requests also run dependency review.
@@ -210,7 +210,7 @@ The supporting stacks (WAF, security services, backups, monitoring) are deployed
 ```text
 .
 ├── src/                 React app: pages, components (including the 3D gallery), RAW editor, hooks, utils, tests
-├── public/              Service worker, web manifest, security.txt, open-source license files
+├── public/              Service worker, web manifest, security.txt, open-source license files, legacy print-link notice
 ├── backend/
 │   ├── functions/       Python Lambda handlers and shared helpers
 │   ├── preview_worker/  Node.js + Sharp image preview worker
@@ -226,8 +226,7 @@ The supporting stacks (WAF, security services, backups, monitoring) are deployed
 ├── tests/browser/       Playwright checks
 ├── legal/               Third-party license texts bundled into the build
 ├── .github/workflows/   Pull request, release, manual release and weekly audit workflows
-├── index.html           Main app entry
-└── print.html           Print store entry
+└── index.html           Main app entry
 ```
 
 ## Documentation
@@ -241,7 +240,7 @@ The supporting stacks (WAF, security services, backups, monitoring) are deployed
 | Monitoring and alarms | [`ops/OBSERVABILITY.md`](ops/OBSERVABILITY.md), [`ops/ALARM_REGISTRY.md`](ops/ALARM_REGISTRY.md) |
 | AWS account security | [`ops/SECURITY_ACCOUNT_BASELINE.md`](ops/SECURITY_ACCOUNT_BASELINE.md), [`ops/SECURITY_OBSERVABILITY.md`](ops/SECURITY_OBSERVABILITY.md) |
 | Maintenance and recovery | [`ops/MAINTENANCE_AND_RECOVERY.md`](ops/MAINTENANCE_AND_RECOVERY.md) |
-| Feature notes | [`ops/PHOTO_ORIGINAL_COMPARISONS.md`](ops/PHOTO_ORIGINAL_COMPARISONS.md), [`ops/HOVER_PREVIEW_MANIFESTS.md`](ops/HOVER_PREVIEW_MANIFESTS.md), [`ops/FOTOMOTO_PRINTS.md`](ops/FOTOMOTO_PRINTS.md) |
+| Feature notes | [`ops/PHOTO_ORIGINAL_COMPARISONS.md`](ops/PHOTO_ORIGINAL_COMPARISONS.md), [`ops/HOVER_PREVIEW_MANIFESTS.md`](ops/HOVER_PREVIEW_MANIFESTS.md), [`ops/PICTOREM_PRINTS.md`](ops/PICTOREM_PRINTS.md) |
 | Privacy requests | [`ops/PRIVACY_REQUESTS.md`](ops/PRIVACY_REQUESTS.md) |
 | Open-source licenses | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) |
 

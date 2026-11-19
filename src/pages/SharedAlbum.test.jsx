@@ -76,6 +76,33 @@ const photoData = {
 describe('SharedAlbum access and gallery', () => {
   afterEach(() => clearCatalogSnapshots())
 
+  it('authorizes a print on click with the current share code and selected photo', async () => {
+    const popup = { document: document.implementation.createHTMLDocument(), close: vi.fn() }
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+    const follow = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const printSourceUrl = 'https://media.s3.us-west-2.amazonaws.com/albums/test/original/photo.jpg?X-Amz-Signature=example'
+    try {
+      api.fetchSharedAlbum.mockResolvedValue({
+        ...photoData,
+        images: [{ ...photoData.images[0], url: 'https://media.test/albums/test/original/photo.jpg', freshDownloadRequired: true }],
+      })
+      api.requestSharedMediaDownload.mockResolvedValue({ printSourceUrl })
+      renderShared('/sharedalbum/share-code-123?photo=p1')
+      fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
+      const order = await screen.findByRole('button', { name: 'Order a print of this photo' })
+      expect(api.requestSharedMediaDownload).not.toHaveBeenCalled()
+      fireEvent.click(order)
+      await waitFor(() => expect(follow).toHaveBeenCalledOnce())
+      expect(api.requestSharedMediaDownload).toHaveBeenCalledWith('share-code-123', 'p1', { forPrint: true })
+      const link = new URL(popup.document.querySelector('a').href)
+      expect(link.searchParams.get('import')).toBe(printSourceUrl)
+      expect(link.href).not.toContain('share-code-123')
+    } finally {
+      open.mockRestore()
+      follow.mockRestore()
+    }
+  })
+
   it('opens shared favorites in their own deck and downloads the correct non-favorite', async () => {
     api.fetchSharedAlbum.mockResolvedValue({ ...photoData, images: [
       { ...photoData.images[0], isFavorite: true }, photoData.images[1],

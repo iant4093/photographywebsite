@@ -13,6 +13,7 @@ vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/mediaUtils', () => media)
 vi.mock('../utils/mediaUrls', () => ({
+  cdnDomain: 'cdn.test',
   mediaDisplayUrl: (item) => item?.url || item?.rawKey,
   mediaThumbnailUrl: (item) => item?.thumbnailUrl || item?.thumbKey,
   mediaId: (item) => item?.id || item?.rawKey,

@@ -1018,9 +1018,7 @@ Resources:
             Prefix: albums/
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
-          # Fotomoto receives only an opaque low-resolution reference generated
-          # after an authorized click. References are deterministic and can be
-          # recreated; print-resolution files are uploaded manually after sale.
+          # Drain historical print references left by the retired integration.
           - Id: ExpireFotomotoReferences
             Status: Enabled
             Prefix: fotomoto/references/
@@ -1150,24 +1148,6 @@ Resources:
                 StringNotEquals:
                   s3:ExistingObjectTag/visibility: public
             - !Ref AWS::NoValue
-
-  PrintSessionSecret:
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Name: !Sub 'ian-photography/${Stage}/fotomoto-print-session'
-      Description: HMAC key for five-minute, single-photo Fotomoto capabilities.
-      GenerateSecretString:
-        PasswordLength: 64
-        ExcludePunctuation: true
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-        - Key: DataClassification
-          Value: ApplicationSecret
 
   PreviewMediaCachePolicy:
     Type: AWS::CloudFront::CachePolicy
@@ -1979,15 +1959,6 @@ Resources:
         'POST /shared/{shareCode}/original-comparison':
           ThrottlingRateLimit: 5
           ThrottlingBurstLimit: 20
-        'POST /albums/{albumId}/print':
-          ThrottlingRateLimit: 2
-          ThrottlingBurstLimit: 10
-        'POST /shared/{shareCode}/print':
-          ThrottlingRateLimit: 2
-          ThrottlingBurstLimit: 10
-        'POST /print/session':
-          ThrottlingRateLimit: 2
-          ThrottlingBurstLimit: 10
         'POST /analytics/events':
           ThrottlingRateLimit: 10
           ThrottlingBurstLimit: 25
@@ -4387,81 +4358,6 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /shared/{shareCode}/original-comparison
-            Method: POST
-            Auth:
-              Authorizer: NONE
-
-  PreparePrintFunction:
-    Type: AWS::Serverless::Function
-    Metadata: *SafePythonBuild
-    Properties:
-      Tags:
-        Feature: public-delivery
-      CodeUri: ./
-      Handler: prepare_print.handler
-      ReservedConcurrentExecutions: 10
-      Timeout: 30
-      MemorySize: 384
-      Environment:
-        Variables:
-          ALBUMS_TABLE: !Ref AlbumsTable
-          IMAGES_BUCKET: !Ref ImagesBucket
-          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
-          RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
-          PRINT_SESSION_SECRET_ARN: !Ref PrintSessionSecret
-          COGNITO_USER_POOL_ID: !Ref UserPool
-          COGNITO_CLIENT_ID: !Ref UserPoolClient
-      Policies:
-        - !Ref FrontDoorOriginSecretReadPolicy
-        - Statement:
-            - Effect: Allow
-              Action: dynamodb:GetItem
-              Resource: !GetAtt AlbumsTable.Arn
-            - Effect: Allow
-              Action: dynamodb:Query
-              Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
-            - Effect: Allow
-              Action: dynamodb:UpdateItem
-              Resource: !GetAtt RateLimitTable.Arn
-            - Effect: Allow
-              Action: ssm:GetParameter
-              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
-            - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref PrintSessionSecret
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource:
-                - !Sub '${ImagesBucket.Arn}/albums/*'
-                - !Sub '${ImagesBucket.Arn}/fotomoto/references/*'
-            - Effect: Allow
-              Action:
-                - s3:PutObject
-                - s3:PutObjectTagging
-              Resource: !Sub '${ImagesBucket.Arn}/fotomoto/references/*'
-      Events:
-        AlbumPrintSession:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref Api
-            Path: /albums/{albumId}/print
-            Method: POST
-            Auth:
-              Authorizer: NONE
-        SharedPrintSession:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref Api
-            Path: /shared/{shareCode}/print
-            Method: POST
-            Auth:
-              Authorizer: NONE
-        RedeemPrintSession:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref Api
-            Path: /print/session
             Method: POST
             Auth:
               Authorizer: NONE

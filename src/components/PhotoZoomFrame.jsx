@@ -1,22 +1,18 @@
 import { useRef, useState } from 'react'
+import useLightboxPhotoDetail from '../hooks/useLightboxPhotoDetail'
 
 const ZOOM_SCALE = 2.5
 const INITIAL_ZOOM = { zoomed: false, x: 50, y: 50, panning: false }
 const PAN_THRESHOLD = 4
 const percent = value => Math.max(0, Math.min(100, value))
 
-function freshDetail(src) {
-    return { src, requested: false, ready: false }
-}
-
 // The fitted frame owns the border and clipping; only its image is transformed.
-export default function PhotoZoomFrame({ bounds, loaded = false, visible = true, outgoing = false, fading = false, ...imageProps }) {
+export default function PhotoZoomFrame({ bounds, loaded = false, visible = true, outgoing = false, fading = false, fullResolutionSrc, ...imageProps }) {
     const [naturalSize, setNaturalSize] = useState(null)
     const [zoom, setZoom] = useState(INITIAL_ZOOM)
+    const frameRef = useRef(null)
     const panRef = useRef(null)
     const suppressClickRef = useRef(false)
-    const [detail, setDetail] = useState(() => freshDetail(imageProps.src))
-    if (detail.src !== imageProps.src) setDetail(freshDetail(imageProps.src))
     if (!visible && zoom.zoomed) setZoom(INITIAL_ZOOM)
 
     const width = Number(imageProps.width) || naturalSize?.width
@@ -27,6 +23,9 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
     const interactive = loaded && visible && !outgoing
     const Frame = outgoing ? 'div' : 'button'
     const scale = zoom.zoomed ? ZOOM_SCALE : 1
+    const fullSource = fullResolutionSrc || imageProps.src
+    const needsUpgrade = Boolean(imageProps.srcSet) || fullSource !== imageProps.src
+    const { detailUrl, loadNow } = useLightboxPhotoDetail(fullSource, interactive && needsUpgrade, frameRef)
 
     const toggleZoom = (event) => {
         event.stopPropagation()
@@ -50,7 +49,7 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
             x: pointerClick ? percent((event.clientX - rect.left) / rect.width * 100) : 50,
             y: pointerClick ? percent((event.clientY - rect.top) / rect.height * 100) : 50,
         })
-        if (imageProps.srcSet) setDetail(current => ({ ...current, requested: true }))
+        void loadNow.current?.()
     }
 
     const startPan = (event) => {
@@ -105,26 +104,9 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
         setZoom(current => ({ ...current, x: percent(current.x + direction[0]), y: percent(current.y + direction[1]) }))
     }
 
-    const detailFailed = (image) => {
-        if (!image.isConnected) return
-        // A detail upgrade is optional. Keep the decoded preview available
-        // and allow a fresh attempt on the next zoom.
-        setDetail(current => current.src === imageProps.src ? freshDetail(current.src) : current)
-    }
-    const detailLoaded = (event) => {
-        const image = event.currentTarget
-        const ready = () => {
-            if (!image.isConnected || image.getAttribute('src') !== imageProps.src) return
-            setDetail(current => current.src === imageProps.src ? { ...current, ready: true } : current)
-        }
-        if (typeof image.decode !== 'function') ready()
-        else {
-            try { image.decode().then(ready, () => detailFailed(image)) } catch { detailFailed(image) }
-        }
-    }
-
     return (
         <Frame
+            ref={frameRef}
             type={outgoing ? undefined : 'button'}
             className={`linen-lightbox-photo-frame ${loaded ? 'is-loaded' : ''} ${outgoing ? 'is-outgoing' : ''} ${fading ? 'is-fading' : ''} ${visible ? '' : 'is-hidden'} ${zoom.zoomed ? 'is-zoomed' : ''} ${zoom.panning ? 'is-panning' : ''}`}
             style={{ width: fit === null ? undefined : width * fit, height: fit === null ? undefined : height * fit }}
@@ -153,9 +135,13 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
                 }}
             >
                 <img
+                    key={detailUrl ? 'full-resolution' : 'preview'}
                     {...imageProps}
+                    src={detailUrl || imageProps.src}
+                    srcSet={detailUrl ? undefined : imageProps.srcSet}
+                    sizes={detailUrl ? undefined : imageProps.sizes}
                     draggable={false}
-                    onLoad={(event) => {
+                    onLoad={detailUrl ? undefined : (event) => {
                         const image = event.currentTarget
                         if (!naturalSize && image.naturalWidth > 0 && image.naturalHeight > 0) {
                             setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight })
@@ -163,19 +149,6 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
                         imageProps.onLoad?.(event)
                     }}
                 />
-                {detail.requested && (
-                    <img
-                        key={detail.src}
-                        src={detail.src}
-                        alt=""
-                        aria-hidden="true"
-                        decoding="async"
-                        draggable={false}
-                        className={`linen-lightbox-photo-detail ${detail.ready ? 'is-ready' : ''}`}
-                        onLoad={detailLoaded}
-                        onError={event => detailFailed(event.currentTarget)}
-                    />
-                )}
             </div>
         </Frame>
     )

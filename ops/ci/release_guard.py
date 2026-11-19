@@ -59,6 +59,16 @@ PROTECTED_RESOURCE_TYPES = frozenset(
     }
 )
 ALLOWED_ACTIONS = frozenset({"Add", "Modify"})
+# The old print checkout is the only removal approved for a routine release.
+# Require explicit retention of its secret when detaching it from the stack.
+PRINT_REMOVALS = {
+    ("PrintSessionSecret", "AWS::SecretsManager::Secret"): "Retain",
+    ("PreparePrintFunction", "AWS::Lambda::Function"): "Delete",
+    ("PreparePrintFunctionRole", "AWS::IAM::Role"): "Delete",
+    ("PreparePrintFunctionAlbumPrintSessionPermission", "AWS::Lambda::Permission"): "Delete",
+    ("PreparePrintFunctionSharedPrintSessionPermission", "AWS::Lambda::Permission"): "Delete",
+    ("PreparePrintFunctionRedeemPrintSessionPermission", "AWS::Lambda::Permission"): "Delete",
+}
 SAFE_REPLACEMENTS = frozenset({None, "False"})
 SAFE_RECREATION = frozenset({None, "Never"})
 INTENT_RULE_REQUIRED_KEYS = frozenset(
@@ -111,7 +121,8 @@ def load_release_intent(
             raise GateError("release intent logical ID is invalid")
         if not isinstance(resource_type, str) or not RESOURCE_TYPE_RE.fullmatch(resource_type):
             raise GateError("release intent resource type is invalid")
-        if action not in ALLOWED_ACTIONS:
+        print_retirement = action == "Remove" and (logical_id, resource_type) in PRINT_REMOVALS
+        if action not in ALLOWED_ACTIONS and not print_retirement:
             raise GateError("release intent action is invalid")
         if not isinstance(property_paths, list) or not all(
             isinstance(path, str) and PROPERTY_PATH_RE.fullmatch(path)
@@ -124,7 +135,9 @@ def load_release_intent(
             raise GateError("release intent detail policy is invalid")
         if not isinstance(allow_protected_modify, bool):
             raise GateError("release intent protected-change policy is invalid")
-        if allow_no_details and action != "Add":
+        if print_retirement and (property_paths or not allow_no_details):
+            raise GateError("print removal rules must allow only changes without property details")
+        if allow_no_details and action != "Add" and not print_retirement:
             raise GateError("only an exact Add rule may allow missing change details")
         if allow_protected_modify and action != "Modify":
             raise GateError("only an exact Modify rule may approve a protected change")
@@ -222,7 +235,7 @@ def gate_change_set(
         logical_id = resource.get("LogicalResourceId")
         resource_type = resource.get("ResourceType")
         replacement = resource.get("Replacement")
-        if action not in ALLOWED_ACTIONS:
+        if action not in ALLOWED_ACTIONS and action != "Remove":
             raise GateError("resource removal or unknown action is not allowed")
         if not isinstance(logical_id, str) or not logical_id:
             raise GateError("resource change has no logical ID")
@@ -231,6 +244,21 @@ def gate_change_set(
         details = resource.get("Details", [])
         if not isinstance(details, list):
             raise GateError("resource change Details must be a list")
+        if action == "Remove":
+            policy = PRINT_REMOVALS.get((logical_id, resource_type))
+            # PolicyAction is optional for default deletions, but we require
+            # CloudFormation itself to confirm when a secret will be retained.
+            if (
+                policy is None
+                or release_intent is None
+                or (logical_id, resource_type, action) not in release_intent
+                or details
+                or replacement not in SAFE_REPLACEMENTS
+                or resource.get("PolicyAction", "Delete") != policy
+            ):
+                raise GateError("resource removal did not match the approved print retirement")
+            counts["Remove"] = counts.get("Remove", 0) + 1
+            continue
         intended_properties: frozenset[str] | None = None
         allow_no_details = False
         allow_protected_modify = False

@@ -875,31 +875,6 @@ fi
         self.assertIn("aws:ResourceTag/Application: IanTruongPhotography", certificate)
         self.assertNotIn("acm:DeleteCertificate", execution)
 
-        print_secret = statement_block(execution, "ManageExactPrintSessionSecretMetadata")
-        for action in (
-            "secretsmanager:CreateSecret",
-            "secretsmanager:DescribeSecret",
-            "secretsmanager:GetResourcePolicy",
-            "secretsmanager:ListSecretVersionIds",
-            "secretsmanager:TagResource",
-            "secretsmanager:UntagResource",
-            "secretsmanager:UpdateSecret",
-        ):
-            self.assertIn(action, print_secret)
-        self.assertIn(
-            "secret:ian-photography/prod/fotomoto-print-session-*",
-            print_secret,
-        )
-        self.assertNotIn("secretsmanager:GetSecretValue", print_secret)
-        self.assertNotIn("secretsmanager:PutSecretValue", print_secret)
-        self.assertNotIn("secretsmanager:DeleteSecret", print_secret)
-
-        generated_value = statement_block(execution, "GeneratePrintSessionSecretValue")
-        self.assertIn("Action: secretsmanager:GetRandomPassword", generated_value)
-        self.assertIn("Resource: '*'", generated_value)
-        self.assertNotIn("secretsmanager:GetSecretValue", generated_value)
-
-        self.assertNotIn("FotomotoPickup", execution)
         self.assertNotIn("iam:CreateAccessKey", execution)
         self.assertNotIn("iam:DeleteAccessKey", execution)
         bootstrap_role = statement_block(execution, "ReadBootstrapReleaseRoles")
@@ -939,7 +914,6 @@ fi
             # Key-group/public-key actions have no resource-level support.
             "ManageCloudFrontKeyMaterial",
             "CreateTaggedApplicationKey",
-            "GeneratePrintSessionSecretValue",
             "EstablishApiGatewayAccessLogResourcePolicies",
             "ManageApiGatewayAccessLogDeliveries",
             "ReadGlobalObservabilityInventories",

@@ -4,7 +4,7 @@ import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../context/auth'
-import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
+import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { motion } from 'framer-motion'
 import PrivateAlbumCatalog from '../components/PrivateAlbumCatalog'
 import SkeletonGrid from '../components/SkeletonGrid'
@@ -20,7 +20,6 @@ import { reuseOriginalPreviews } from '../utils/originalPreviewReuse'
 import { pollZipJob } from '../utils/zipDownload'
 import AlbumStats from '../components/AlbumStats'
 import PhotoLightbox from '../components/PhotoLightbox'
-import { openPrintOrder } from '../utils/printOrders'
 import { albumPath } from '../utils/albumRoutes'
 
 // User dashboard — shows only their private albums with download capability
@@ -219,6 +218,10 @@ function UserDashboard() {
 
     const closeLightbox = resetLightbox
 
+    const requestPrintSource = async image => requestAlbumMediaDownload(
+        selectedAlbum.albumId, mediaId(image), await getIdToken(), { forPrint: true },
+    )
+
     // Download current lightbox image
     const downloadImage = async (e) => {
         e.stopPropagation()
@@ -239,23 +242,6 @@ function UserDashboard() {
         } catch (err) {
             console.error('Download failed:', err)
             alert('The photo could not be downloaded. Please try again.')
-        }
-    }
-
-    const printImage = async (event, image) => {
-        event.stopPropagation()
-        if (!image || !selectedAlbum?.albumId) return
-        const returnFocusTo = event.currentTarget
-        try {
-            const token = await getIdToken()
-            await openPrintOrder(() => requestAlbumPrintSession(
-                selectedAlbum.albumId,
-                mediaId(image),
-                token,
-            ), returnFocusTo)
-        } catch (error) {
-            console.error('Print order failed:', error)
-            alert(error?.message || 'The print store could not be opened. Please try again.')
         }
     }
 
@@ -408,7 +394,8 @@ function UserDashboard() {
                     onNext={goNext}
                     onPrevious={goPrev}
                     onDownload={downloadImage}
-                    onPrint={printImage}
+                    publicPrint={selectedAlbum?.visibility === 'public'}
+                    requestPrintSource={selectedAlbum?.visibility === 'public' ? undefined : requestPrintSource}
                     canShare={false}
                     onBeforeRefresh={refreshOriginal}
                     onMediaError={() => requestSelectedRefresh('media-error')}

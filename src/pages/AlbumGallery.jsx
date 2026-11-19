@@ -3,7 +3,7 @@ import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router'
-import { fetchAlbumForViewing, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
+import { fetchAlbumForViewing, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import AlbumLoadingSkeleton from '../components/AlbumLoadingSkeleton'
 import PhotoLightbox from '../components/PhotoLightbox'
@@ -22,7 +22,6 @@ import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { reuseOriginalPreviews } from '../utils/originalPreviewReuse'
 import { pollZipJob } from '../utils/zipDownload'
 import { navigateBackOr } from '../utils/navigation'
-import { openPrintOrder } from '../utils/printOrders'
 import { trackAlbumView, trackPhotoDownload, trackZipRequest } from '../utils/analytics'
 import { shareUrlForAlbumPhoto } from '../utils/share'
 import useAlbumRouteId from '../hooks/useAlbumRouteId'
@@ -170,6 +169,10 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         if (!embedded) onSharedPhotoClose?.()
     }, [embedded, onSharedPhotoClose, resetLightbox])
 
+    const requestPrintSource = async image => requestAlbumMediaDownload(
+        albumId, mediaId(image), await getIdToken(), { forPrint: true },
+    )
+
     // Download current lightbox image
     const downloadImage = async (e) => {
         e.stopPropagation()
@@ -188,20 +191,6 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         } catch (err) {
             console.error('Download failed:', err)
             alert('The photo could not be downloaded. Please try again.')
-        }
-    }
-
-    const printImage = async (event, image) => {
-        event.stopPropagation()
-        if (!image) return
-        const returnFocusTo = event.currentTarget
-        try {
-            let token = null
-            try { token = await getIdToken() } catch { /* public album */ }
-            await openPrintOrder(() => requestAlbumPrintSession(albumId, mediaId(image), token), returnFocusTo)
-        } catch (error) {
-            console.error('Print order failed:', error)
-            alert(error?.message || 'The print store could not be opened. Please try again.')
         }
     }
 
@@ -353,7 +342,8 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                 onNext={goNext}
                                 onPrevious={goPrev}
                                 onDownload={downloadImage}
-                                onPrint={printImage}
+                                publicPrint={album.visibility === 'public'}
+                                requestPrintSource={album.visibility === 'public' ? undefined : requestPrintSource}
                                 canShare={album.visibility === 'public'}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
                                 shareUrl={image => shareUrlForAlbumPhoto(albumHandle({ ...album, albumId }), mediaId(image))}

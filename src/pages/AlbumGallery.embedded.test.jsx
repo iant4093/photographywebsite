@@ -5,7 +5,6 @@ const api = vi.hoisted(() => ({
     fetchAlbumForViewing: vi.fn(),
     requestAlbumOriginalComparison: vi.fn(),
     requestAlbumMediaDownload: vi.fn(),
-    requestAlbumPrintSession: vi.fn(),
     requestAlbumZip: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
@@ -27,12 +26,13 @@ vi.mock('../utils/zipDownload', () => zip)
 vi.mock('../utils/analytics', () => ({ trackAlbumView: vi.fn(), trackPhotoDownload: vi.fn(), trackZipRequest: vi.fn() }))
 
 import { AlbumGalleryContent } from './AlbumGallery'
+import { cdnDomain } from '../utils/mediaUrls'
 
 const data = {
     album: { albumId: 'a1', title: 'Coastal Light', createdAt: '2026-01-01', visibility: 'public' },
     images: [
         {
-            id: 'one', url: 'https://media.test/one.jpg', thumbnailUrl: 'https://media.test/one-thumb.jpg',
+            id: 'one', downloadUrl: `https://${cdnDomain || 'd1twwtwfz1yeo4.cloudfront.net'}/albums/a1/original/one.jpg`, url: 'https://media.test/one.jpg', thumbnailUrl: 'https://media.test/one-thumb.jpg',
             width: 2400, height: 1600, exif: { model: 'Canon EOS R7', lens: 'Sigma 18-50mm F2.8' },
             before: { status: 'ready', url: 'https://media.test/one-original.jpg', width: 2400, height: 1600 },
         },
@@ -100,6 +100,35 @@ describe('embedded album gallery', () => {
         render(<AlbumGalleryContent albumId="a1" initialPhotoId="two" />)
         expect(await screen.findByText('1 / 1')).toBeInTheDocument()
         expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('requests a print source only when the private photo button is clicked', async () => {
+        const popup = { document: document.implementation.createHTMLDocument(), close: vi.fn() }
+        const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+        const follow = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+        const printSourceUrl = 'https://media.s3.us-west-2.amazonaws.com/albums/a1/original/one.jpg?X-Amz-Signature=example'
+        try {
+            api.fetchAlbumForViewing.mockResolvedValue({
+                ...data,
+                album: { ...data.album, visibility: 'private' },
+                images: [{ ...data.images[0], freshDownloadRequired: true }, data.images[1]],
+            })
+            api.requestAlbumMediaDownload.mockResolvedValue({ printSourceUrl })
+            render(<AlbumGalleryContent albumId="a1" />)
+            fireEvent.click(await screen.findByRole('button', { name: 'Open item 1 from Coastal Light' }))
+            const order = screen.getByRole('button', { name: 'Order a print of this photo' })
+            expect(api.requestAlbumMediaDownload).not.toHaveBeenCalled()
+            fireEvent.click(order)
+            await waitFor(() => expect(follow).toHaveBeenCalledOnce())
+            expect(api.requestAlbumMediaDownload).toHaveBeenCalledWith('a1', 'one', 'current-token', { forPrint: true })
+            const link = popup.document.querySelector('a')
+            expect(new URL(link.href).searchParams.get('import')).toBe(printSourceUrl)
+            expect(link.getAttribute('rel')).toBe('noreferrer')
+            expect(popup.opener).toBeNull()
+        } finally {
+            open.mockRestore()
+            follow.mockRestore()
+        }
     })
 
     it.each([false, true])('refreshes album statistics with the gallery photos (embedded: %s)', async embedded => {
@@ -208,7 +237,7 @@ describe('embedded album gallery', () => {
         expect(within(screen.getByRole('dialog')).getByText('Canon EOS R7')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Show original photo' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Download photo' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Order a print of this photo' })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Order a print of this photo' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
         expect(screen.getByText('2 / 2')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))

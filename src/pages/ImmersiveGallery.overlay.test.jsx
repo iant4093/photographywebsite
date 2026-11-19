@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const canvasState = vi.hoisted(() => ({ scene: null, camera: null, dpr: null, mounts: 0, unmounts: 0 }))
 const api = vi.hoisted(() => ({
     fetchAlbumForViewing: vi.fn(), fetchAllAlbums: vi.fn(), requestAlbumMediaDownload: vi.fn(),
-    requestAlbumPrintSession: vi.fn(), requestAlbumZip: vi.fn(),
+    requestAlbumZip: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 

@@ -193,9 +193,6 @@ expected_routes = {
     ("POST", "/shared/{shareCode}/original-comparison"),
     ("POST", "/albums/{albumId}/download-url"),
     ("POST", "/shared/{shareCode}/download-url"),
-    ("POST", "/albums/{albumId}/print"),
-    ("POST", "/shared/{shareCode}/print"),
-    ("POST", "/print/session"),
     ("PATCH", "/albums/{albumId}/images"),
     ("POST", "/upload-url"),
     ("POST", "/admin/hero/{operation}"),
@@ -228,9 +225,6 @@ expected_throttles = {
     "POST /shared/{shareCode}/download-url": (5, 20),
     "POST /albums/{albumId}/original-comparison": (5, 20),
     "POST /shared/{shareCode}/original-comparison": (5, 20),
-    "POST /albums/{albumId}/print": (2, 10),
-    "POST /shared/{shareCode}/print": (2, 10),
-    "POST /print/session": (2, 10),
     "POST /analytics/events": (10, 25),
     "GET /public/explore": (5, 15),
 }
@@ -751,25 +745,6 @@ class BrowserBoundaryTests(unittest.TestCase):
         self.assertNotIn("https://*.s3", csp)
         self.assertNotIn("{s3_origins}", csp)
 
-    def test_print_bridge_is_embeddable_only_by_the_canonical_site(self) -> None:
-        print_csp = cloudfront_frontend.render_print_csp(
-            BASELINE,
-            media_domain="media.example.test",
-        )
-        self.assertIn("frame-ancestors https://iantruongphotography.com", print_csp)
-        self.assertNotIn("frame-ancestors 'none'", print_csp)
-        self.assertIn(
-            "frame-src https://challenges.cloudflare.com https://prints.iantruongphotography.com",
-            BASELINE["content_security_policy_template"],
-        )
-        print_policy = cloudfront_frontend.print_policy_config({
-            "fotomoto_print": {
-                **BASELINE["fotomoto_print"],
-                "content_security_policy": print_csp,
-            }
-        })
-        self.assertNotIn("FrameOptions", print_policy["SecurityHeadersConfig"])
-
     def test_cloudfront_apply_is_guarded(self) -> None:
         script = (ROOT / "ops" / "cloudfront_frontend.py").read_text(encoding="utf-8")
         for guard in ("--expected-etag", "--expected-account-id", "--apply"):
@@ -1191,22 +1166,13 @@ class IdentityAndSecretTests(unittest.TestCase):
             self.assertIn("NoEcho: true", match.group("body"))
 
     def test_rate_limit_identifiers_use_one_exact_secure_parameter(self) -> None:
-        self.assertEqual(TEMPLATE.count("Type: AWS::SecretsManager::Secret"), 1)
-        self.assertIn("PrintSessionSecret:", TEMPLATE)
         self.assertEqual(
             TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
-            8,
+            7,
         )
         # 20 pre-existing reads, the five private-media cookie signers, and the
         # read-only raw photo viewer's Google credential.
-        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 26)
-
-    def test_free_print_plan_has_no_vendor_credential_or_original_staging_path(self) -> None:
-        print_function = resource_block("PreparePrintFunction")
-        self.assertIn("${ImagesBucket.Arn}/fotomoto/references/*", print_function)
-        self.assertNotIn("fotomoto/originals", TEMPLATE)
-        self.assertNotIn("FotomotoAutoPickup", TEMPLATE)
-        self.assertNotIn("AWS::IAM::User", TEMPLATE)
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 25)
 
     def test_cognito_client_has_no_public_password_or_srp_flow(self) -> None:
         client = resource_block("UserPoolClient")

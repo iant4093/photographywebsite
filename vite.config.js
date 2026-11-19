@@ -48,10 +48,6 @@ export default defineConfig(({ mode }) => {
       assetsInlineLimit: 4096,
       modulePreload: { polyfill: false },
       rollupOptions: {
-        input: {
-          main: 'index.html',
-          print: 'print.html',
-        },
         output: {
           entryFileNames: 'assets/app-[hash].js',
           chunkFileNames: 'assets/[name]-[hash].js',

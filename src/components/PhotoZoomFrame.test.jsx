@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PhotoZoomFrame from './PhotoZoomFrame'
+import { lightboxMotionControllers, requestLightboxClose } from '../utils/lightboxMotionControl'
 
 const props = {
     bounds: { width: 800, height: 600 },
@@ -23,7 +24,7 @@ function pointer(frame, type, options = {}) {
 }
 
 function zoomedFrame() {
-    render(<PhotoZoomFrame {...props} />)
+    render(<PhotoZoomFrame {...props} srcSet={undefined} />)
     const frame = screen.getByRole('button', { name: 'Zoom in on photo' })
     vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600 })
     frame.setPointerCapture = vi.fn()
@@ -89,67 +90,123 @@ describe('PhotoZoomFrame panning', () => {
 })
 
 describe('PhotoZoomFrame detail upgrade', () => {
-    it('keeps the preview unchanged until full resolution decodes and retains it across zoom toggles', async () => {
+    const fullResolutionSrc = 'https://media.test/original.jpg'
+    const objectUrl = 'blob:https://media.test/image'
+    let fetchImage, decode, createObjectURL, revokeObjectURL
+    const imageResponse = { ok: true, blob: async () => new Blob(['image'], { type: 'image/jpeg' }) }
+
+    beforeEach(() => {
+        vi.useFakeTimers()
+        fetchImage = vi.fn().mockResolvedValue(imageResponse)
+        decode = vi.fn().mockResolvedValue(undefined)
+        createObjectURL = vi.fn().mockReturnValue(objectUrl)
+        revokeObjectURL = vi.fn()
+        vi.stubGlobal('fetch', fetchImage)
+        vi.stubGlobal('Image', class {
+            decode() { return decode() }
+        })
+        vi.stubGlobal('URL', class extends URL {
+            static createObjectURL = createObjectURL
+            static revokeObjectURL = revokeObjectURL
+        })
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+        vi.unstubAllGlobals()
+    })
+
+    it('waits 800 ms after the preview loads and replaces the actual image only after the original decodes', async () => {
         const onLoad = vi.fn()
-        const { container } = render(<PhotoZoomFrame {...props} onLoad={onLoad} />)
-        const preview = screen.getByAltText('Photo')
+        let finishDecode
+        decode.mockImplementation(() => new Promise(resolve => { finishDecode = resolve }))
+        const { rerender, unmount } = render(<PhotoZoomFrame {...props} loaded={false} fullResolutionSrc={fullResolutionSrc} onLoad={onLoad} />)
+        await act(async () => vi.advanceTimersByTimeAsync(800))
+        expect(fetchImage).not.toHaveBeenCalled()
+
+        rerender(<PhotoZoomFrame {...props} fullResolutionSrc={fullResolutionSrc} onLoad={onLoad} />)
+        const photo = screen.getByAltText('Photo')
         const frame = screen.getByRole('button', { name: 'Zoom in on photo' })
         const size = frame.getAttribute('style')
-        fireEvent.click(frame)
-        const detail = container.querySelector('.linen-lightbox-photo-detail')
-        let finishDecode
-        detail.decode = () => new Promise(resolve => { finishDecode = resolve })
-        fireEvent.load(detail)
-        expect(detail).not.toHaveClass('is-ready')
-        expect(preview).toHaveAttribute('srcset', props.srcSet)
-        expect(preview).toHaveAttribute('src', props.src)
-        expect(onLoad).not.toHaveBeenCalled()
-        expect(frame.getAttribute('style')).toBe(size)
+        await act(async () => vi.advanceTimersByTimeAsync(799))
+        expect(fetchImage).not.toHaveBeenCalled()
+        await act(async () => vi.advanceTimersByTimeAsync(1))
+        expect(fetchImage).toHaveBeenCalledWith(fullResolutionSrc, { signal: expect.any(AbortSignal) })
+        expect(photo).toHaveAttribute('srcset', props.srcSet)
 
-        // A delayed upgrade can finish during zoom-out without changing the
-        // transform, replacing the preview, or restarting the viewer's fade.
-        fireEvent.click(frame)
-        const transform = preview.parentElement.style.transform
         await act(async () => finishDecode())
-        expect(detail).toHaveClass('is-ready')
-        expect(preview.parentElement.style.transform).toBe(transform)
-        expect(screen.getByAltText('Photo')).toBe(preview)
+        const original = screen.getByAltText('Photo')
+        expect(photo).not.toBeInTheDocument()
+        expect(original).toHaveAttribute('src', objectUrl)
+        expect(original).not.toHaveAttribute('srcset')
+        expect(original).not.toHaveAttribute('sizes')
         expect(frame.getAttribute('style')).toBe(size)
-        fireEvent.click(frame)
-        expect(container.querySelector('.linen-lightbox-photo-detail')).toBe(detail)
-        expect(preview).toHaveAttribute('srcset', props.srcSet)
+        fireEvent.load(original)
         expect(onLoad).not.toHaveBeenCalled()
+        unmount()
+        expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(objectUrl)
     })
 
-    it.each(['error', 'decode'])('keeps the photo usable after a detail %s failure and retries on the next zoom', async (failure) => {
-        const onError = vi.fn()
-        const { container } = render(<PhotoZoomFrame {...props} onError={onError} />)
+    it('starts immediately on zoom and keeps the original across zoom toggles', async () => {
+        const { unmount } = render(<PhotoZoomFrame {...props} />)
         const frame = screen.getByRole('button', { name: 'Zoom in on photo' })
-        fireEvent.click(frame)
-        const detail = container.querySelector('.linen-lightbox-photo-detail')
-        if (failure === 'decode') {
-            detail.decode = () => Promise.reject(new Error('Unable to decode'))
-            await act(async () => fireEvent.load(detail))
-        } else fireEvent.error(detail)
-        expect(container.querySelector('.linen-lightbox-photo-detail')).toBeNull()
-        expect(screen.getByAltText('Photo')).toHaveAttribute('srcset', props.srcSet)
-        expect(frame).toBeEnabled()
-        expect(onError).not.toHaveBeenCalled()
+        await act(async () => fireEvent.click(frame))
+        expect(fetchImage).toHaveBeenCalledWith(props.src, { signal: expect.any(AbortSignal) })
+        expect(screen.getByAltText('Photo')).toHaveAttribute('src', objectUrl)
         fireEvent.click(frame)
         fireEvent.click(frame)
-        expect(container.querySelector('.linen-lightbox-photo-detail')).not.toBe(detail)
+        await act(async () => vi.advanceTimersByTimeAsync(1000))
+        expect(fetchImage).toHaveBeenCalledOnce()
+        expect(screen.getByAltText('Photo')).toHaveAttribute('src', objectUrl)
+        unmount()
     })
 
-    it('ignores a late decode from a replaced media URL', async () => {
-        const { container, rerender } = render(<PhotoZoomFrame {...props} />)
-        fireEvent.click(screen.getByRole('button', { name: 'Zoom in on photo' }))
-        const detail = container.querySelector('.linen-lightbox-photo-detail')
+    it('clears the dwell timer on a fast navigation and aborts a transfer when the photo changes again', async () => {
+        let finishFetch
+        fetchImage.mockImplementationOnce(() => new Promise(resolve => { finishFetch = resolve }))
+        const { rerender } = render(<PhotoZoomFrame {...props} />)
+        await act(async () => vi.advanceTimersByTimeAsync(500))
+        rerender(<PhotoZoomFrame {...props} src="https://media.test/second.jpg" />)
+        await act(async () => vi.advanceTimersByTimeAsync(800))
+
+        expect(fetchImage).toHaveBeenCalledExactlyOnceWith('https://media.test/second.jpg', { signal: expect.any(AbortSignal) })
+        const { signal } = fetchImage.mock.calls[0][1]
+        rerender(<PhotoZoomFrame {...props} src="https://media.test/third.jpg" />)
+        expect(signal.aborted).toBe(true)
+        await act(async () => finishFetch(imageResponse))
+        expect(createObjectURL).not.toHaveBeenCalled()
+        expect(screen.getByAltText('Photo')).toHaveAttribute('src', 'https://media.test/third.jpg')
+    })
+
+    it('aborts when the close animation starts and releases a stale image that is still decoding', async () => {
         let finishDecode
-        detail.decode = () => new Promise(resolve => { finishDecode = resolve })
-        fireEvent.load(detail)
-        rerender(<PhotoZoomFrame {...props} src="https://media.test/refreshed.jpg" />)
+        decode.mockImplementation(() => new Promise(resolve => { finishDecode = resolve }))
+        const { container, unmount } = render(<div className="linen-lightbox"><PhotoZoomFrame {...props} /></div>)
+        const dialog = container.firstChild
+        const requestClose = vi.fn()
+        lightboxMotionControllers.set(dialog, { requestClose })
+        await act(async () => vi.advanceTimersByTimeAsync(800))
+        const { signal } = fetchImage.mock.calls[0][1]
+        const close = vi.fn()
+        requestLightboxClose(screen.getByAltText('Photo'), close)
+        expect(requestClose).toHaveBeenCalledExactlyOnceWith(close)
+        expect(signal.aborted).toBe(true)
         await act(async () => finishDecode())
-        expect(container.querySelector('.linen-lightbox-photo-detail')).toBeNull()
-        expect(screen.getByAltText('Photo')).toHaveAttribute('src', 'https://media.test/refreshed.jpg')
+        expect(screen.getByAltText('Photo')).toHaveAttribute('srcset', props.srcSet)
+        unmount()
+        expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(objectUrl)
+    })
+
+    it('keeps the preview available after a failed upgrade and can retry on zoom', async () => {
+        decode.mockRejectedValueOnce(new Error('Unable to decode'))
+        const onError = vi.fn()
+        const { unmount } = render(<PhotoZoomFrame {...props} onError={onError} />)
+        await act(async () => vi.advanceTimersByTimeAsync(800))
+        expect(screen.getByAltText('Photo')).toHaveAttribute('srcset', props.srcSet)
+        expect(onError).not.toHaveBeenCalled()
+        await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Zoom in on photo' })))
+        expect(fetchImage).toHaveBeenCalledTimes(2)
+        expect(screen.getByAltText('Photo')).toHaveAttribute('src', objectUrl)
+        unmount()
     })
 })

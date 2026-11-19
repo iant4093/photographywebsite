@@ -4,13 +4,13 @@ const loader = vi.hoisted(() => ({ loadExplorerViewer: vi.fn(), readExplorerView
 const sharing = vi.hoisted(() => ({ sharePage: vi.fn() }))
 vi.mock('../utils/explorerViewer', () => loader)
 vi.mock('../utils/share', () => sharing)
-vi.mock('../utils/mediaUrls', () => ({ mediaDisplayUrl: image => image.url, mediaId: image => image.id, mediaPreviewSrcSet: () => '', mediaBeforeDisplayUrl: image => image?.before?.url || '', mediaBeforeSrcSet: () => '' }))
+vi.mock('../utils/mediaUrls', () => ({ cdnDomain: 'media.test', mediaDisplayUrl: image => image.url, mediaId: image => image.id, mediaPreviewSrcSet: () => '', mediaBeforeDisplayUrl: image => image?.before?.url || '', mediaBeforeSrcSet: () => '' }))
 vi.mock('../utils/mediaAccessibility', () => ({ photoDescription: image => image.title }))
 import ExplorerPhotoLightbox from './ExplorerPhotoLightbox'
 
 let resolveViewer, rejectViewer
 const props = {
-    images: [{ id: 'one', title: 'One', url: '/one.webp', width: 1200, height: 800 }, { id: 'two', title: 'Two', url: '/two.webp', width: 1200, height: 800 }],
+    images: [{ id: 'one', title: 'One', url: '/one.webp', downloadUrl: 'https://media.test/albums/test/original/one.jpg', width: 1200, height: 800 }, { id: 'two', title: 'Two', url: '/two.webp', width: 1200, height: 800 }],
     index: 0, ariaLabel: 'Photographs', onClose: vi.fn(), onNext: vi.fn(), onPrevious: vi.fn(),
 }
 function Viewer({ initialImageReady, initialComparisonRequested, initialOriginalReady }) {
@@ -88,14 +88,14 @@ it('ignores a late code response after the visitor closes', async () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
 
-it('keeps zoom, download and print available before the viewer code arrives', async () => {
-    const onDownload = vi.fn(), onPrint = vi.fn().mockResolvedValue(undefined)
-    render(<ExplorerPhotoLightbox {...props} onDownload={onDownload} onPrint={onPrint} />)
+it('keeps zoom, download and print available before the viewer code arrives', () => {
+    const onDownload = vi.fn()
+    render(<ExplorerPhotoLightbox {...props} onDownload={onDownload} publicPrint />)
     fireEvent.load(screen.getByRole('img', { name: 'One' }))
     fireEvent.click(screen.getByRole('button', { name: 'Download photo' }))
     expect(onDownload).toHaveBeenCalledWith(expect.anything(), props.images[0], 0)
-    fireEvent.click(screen.getByRole('button', { name: 'Order a print of this photo' }))
-    await waitFor(() => expect(onPrint).toHaveBeenCalledOnce())
+    const order = screen.getByRole('link', { name: 'Order a print of this photo' })
+    expect(new URL(order.href).searchParams.get('import')).toBe(props.images[0].downloadUrl)
     expect(screen.getByRole('button', { name: /zoom/i })).toBeEnabled()
 })
 
@@ -121,12 +121,12 @@ it('looks up an unresolved original on hover or focus before the click', async (
 
 it('preserves an original comparison opened while the viewer code is delayed', async () => {
     const image = { ...props.images[0], before: { status: 'ready', url: '/before.webp', width: 1200, height: 800 } }
-    render(<ExplorerPhotoLightbox {...props} images={[image]} onDownload={vi.fn()} onPrint={vi.fn()} />)
+    render(<ExplorerPhotoLightbox {...props} images={[image]} onDownload={vi.fn()} publicPrint />)
     fireEvent.load(screen.getByRole('img', { name: 'One' }))
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     fireEvent.load(screen.getByRole('img', { name: 'Before editing — One', hidden: true }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Download edited photo' })).toBeEnabled())
-    expect(screen.getByRole('button', { name: 'Order a print of the edited photo' })).toBeEnabled()
+    expect(screen.getByRole('link', { name: 'Order a print of the edited photo' })).toBeVisible()
     await act(async () => resolveViewer(Viewer))
     expect(await screen.findByRole('dialog', { name: 'Loaded viewer' })).toHaveTextContent('Original remains ready')
 })

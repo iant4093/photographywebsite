@@ -92,7 +92,7 @@ described above. The flag is opt-in. Without it, the helper leaves any existing
 - the private-media origin is created or updated by its fixed ID, and the
   helper refuses if that ID already points at another domain;
 - `private-media/*` becomes a managed behavior, ordered after the API and
-  social document behaviors and before `print.html`, `assets/*` and static
+  social document behaviors and before `assets/*` and static
   paths;
 - the dry-run summary prints a `privateMedia` section (`enabled`,
   `originDomain`, `keyGroupIdPresent`, `missing`) with identifiers only;
@@ -134,7 +134,6 @@ cache-invalidation worker's `cloudfront:CreateInvalidation` resource) and the
      --stack-name ian-website
      --region us-west-2
      --include-www
-     --include-fotomoto-print
      --include-api-front-door
      --api-certificate-arn "$api_certificate_arn"
      --origin-parameter-name "$origin_parameter_name"

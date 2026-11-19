@@ -38,7 +38,7 @@ dry-run by default. Apply requires the guard values printed by the dry run
 | [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md) | Same-origin API, origin verification, WAF, rotation, rollback |
 | [`PHOTO_API.md`](PHOTO_API.md) | Dedicated public photo endpoint, catalog publisher, and traffic controls |
 | [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md) | Signed-cookie delivery of protected album media |
-| [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) | Isolated print-store origin and manual print-file delivery |
+| [`PICTOREM_PRINTS.md`](PICTOREM_PRINTS.md) | Print ordering and fulfillment |
 | [`PHOTO_ORIGINAL_COMPARISONS.md`](PHOTO_ORIGINAL_COMPARISONS.md) | Drive original matching and private Before/After previews |
 | [`HOVER_PREVIEW_MANIFESTS.md`](HOVER_PREVIEW_MANIFESTS.md) | Album-card hover manifests, reconciliation, rollback |
 | [`MAINTENANCE_AND_RECOVERY.md`](MAINTENANCE_AND_RECOVERY.md) | Dependency updates, durable-work repair, comparison cleanup, restore drills |
@@ -58,16 +58,16 @@ dry-run by default. Apply requires the guard values printed by the dry run
   service-account JSON files are not copied into an artifact.
 - `frontend_cloudfront_baseline.json` and `cloudfront_frontend.py` manage the
   frontend distribution settings. The script makes no certificate, DNS, origin
-  or logging change unless a flag asks for it.
+  or logging change unless a flag asks for it. See the print cutover before
+  applying this version to a distribution with the old print alias.
 - [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md) covers the same-origin API, origin
   verification, the WAF, secret rotation, validation and rollback.
 - [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md) covers signed-cookie delivery of
   protected album media through the frontend distribution: the SAM resources,
   the `--include-private-media` edge change, rollout, verification, key
   rotation, revocation timing, and rollback.
-- [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) covers the isolated print-store
-  origin, the scope of a private-gallery print link, the Free-plan preview
-  handoff, and manual upload of print-ready files.
+- [`PICTOREM_PRINTS.md`](PICTOREM_PRINTS.md) covers public and protected print links,
+  Pictorem checkout and order support, and retiring the old print infrastructure.
 - [`PHOTO_ORIGINAL_COMPARISONS.md`](PHOTO_ORIGINAL_COMPARISONS.md) covers the
   read-only Drive matcher, private Before/After previews, the backfill, the
   separate CloudFront CSP rollout, and failure recovery.
@@ -487,7 +487,7 @@ reported by the dry run.
 | --- | --- |
 | `validate_infrastructure.sh` | Local gate: compile, ops tests, template lint (cfn-lint or `sam validate --lint`), SAM validate, preview worker tests; `--build` also runs `sam build` and checks Lambda artifacts for credential-like JSON |
 | `aws_stack.py` | Shared read-only AWS CLI discovery helpers (not run directly) |
-| `cloudfront_frontend.py` | Frontend distribution baseline, `www` redirect, front door, print store, private media |
+| `cloudfront_frontend.py` | Frontend distribution baseline, `www` redirect, front door, private media |
 | `cloudfront_www_redirect.js`, `cloudfront_social_router.js` | CloudFront viewer-request functions bound by `cloudfront_frontend.py` |
 | `dns_hardening.py` | CAA and `www` alias records |
 | `front_door_preflight.py` | Read-only CloudFront/WAF/API boundary check |

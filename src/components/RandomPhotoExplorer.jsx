@@ -3,7 +3,7 @@ import ExplorerPhotoLightbox from './ExplorerPhotoLightbox'
 import { rememberLightboxTrigger } from '../utils/lightboxOrigin'
 import { warmExplorerViewer } from '../utils/explorerViewer'
 import SectionStats from './SectionStats'
-import { fetchRandomPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
+import { fetchRandomPhotos, requestAlbumMediaDownload } from '../utils/api'
 import {
     mediaFileName,
     mediaDisplayUrl,
@@ -194,18 +194,6 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
         }
     }, [])
 
-    const handlePrint = useCallback(async (event, image) => {
-        event.stopPropagation()
-        const returnFocusTo = event.currentTarget
-        try {
-            const { openPrintOrder } = await import('../utils/printOrders')
-            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)), returnFocusTo)
-        } catch (printError) {
-            console.error('Random photo print order failed:', printError)
-            alert(printError?.message || 'The print store could not be opened. Please try again.')
-        }
-    }, [])
-
     return (
         <>
             {variant === 'icon' ? (
@@ -252,7 +240,7 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
                     onPrevious={() => setIndex((current) => (current - 1 + photos.length) % photos.length)}
                     onRetry={error ? handleRetry : undefined}
                     onDownload={handleDownload}
-                    onPrint={handlePrint}
+                    publicPrint
                     onBeforeRefresh={refreshOriginal}
                     shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
                 />

@@ -113,8 +113,9 @@ recorded in the change set description that later steps check.
 
 Backend planning requires the stack to be `IN_SYNC` in a drift check, keeps
 every current stack parameter with `UsePreviousValue`, and creates a change set
-without executing it. `release_guard.py` rejects removals, replacements and
-recreations other than reviewed dependency cascades, changes outside
+without executing it. `release_guard.py` permits only the specific removals
+documented in the [print cutover](PICTOREM_PRINTS.md#cutover). It rejects
+replacements and recreations other than reviewed dependency cascades, changes outside
 `ops/ci/release_intent.json`, protected-resource changes not approved by an
 intent rule, and stacks that fail its stack checks
 (deployable status, termination protection, and the front-door, execute-api,
@@ -145,7 +146,8 @@ empty backend change set is deleted and the deploy job is skipped.
 Frontend deployment never deletes S3 objects. `frontend_deploy.sh` verifies the
 bucket's public-access block and that the distribution is deployed, enabled, and
 OAC-backed. `frontend_changes.py` compares object content and cache metadata,
-uploads only changed files, and uploads `print.html` and `index.html` last.
+uploads only changed files, and uploads the legacy print notice (`print.html`)
+and the app entry point (`index.html`) last.
 Metadata reads and asset uploads share an SDK client with at most eight requests
 in flight, bounded retries, and request timeouts. Every asset upload must finish
 successfully before either HTML entrypoint is published. Exact backend object
@@ -594,9 +596,8 @@ certificates in `us-west-2`, and record changes in the configured hosted zone.
 `route53:ChangeResourceRecordSets` is scoped to that hosted zone with no
 record-name condition. `route53:GetChange` uses a `change/*` resource because
 change IDs are not known in advance. The origin-verification value is an
-encrypted SSM parameter that the stack does not write. The only Secrets Manager
-secrets the role can create or update are
-`ian-photography/prod/fotomoto-print-session-*`.
+encrypted SSM parameter that the stack does not write. See
+[print cutover](PICTOREM_PRINTS.md#cutover) for the versioned resource removals.
 
 When changing these policies, validate them with IAM Access Analyzer and test a
 non-executing change set against the current `backend/template.yaml`. Add only

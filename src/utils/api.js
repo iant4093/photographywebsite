@@ -623,7 +623,7 @@ export function requestAlbumMediaDownload(albumId, mediaId, token = null, option
     return apiFetch(`/albums/${encodeURIComponent(albumId)}/download-url`, {
         method: 'POST',
         headers: authHeaders(token),
-        body: JSON.stringify({ mediaId }),
+        body: JSON.stringify({ mediaId, purpose: options.forPrint ? 'print' : undefined }),
         signal: options.signal,
     })
 }
@@ -631,7 +631,7 @@ export function requestAlbumMediaDownload(albumId, mediaId, token = null, option
 export function requestSharedMediaDownload(shareCode, mediaId, options = {}) {
     return apiFetch(`/shared/${encodeURIComponent(shareCode)}/download-url`, {
         method: 'POST',
-        body: JSON.stringify({ mediaId }),
+        body: JSON.stringify({ mediaId, purpose: options.forPrint ? 'print' : undefined }),
         signal: options.signal,
     })
 }
@@ -649,31 +649,6 @@ export function requestSharedOriginalComparison(shareCode, mediaId, options = {}
     return apiFetch(`/shared/${encodeURIComponent(shareCode)}/original-comparison`, {
         method: 'POST',
         body: JSON.stringify({ mediaId }),
-        signal: options.signal,
-    })
-}
-
-export function requestAlbumPrintSession(albumId, mediaId, token = null, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}/print`, {
-        method: 'POST',
-        headers: authHeaders(token),
-        body: JSON.stringify({ mediaId }),
-        signal: options.signal,
-    })
-}
-
-export function requestSharedPrintSession(shareCode, mediaId, options = {}) {
-    return apiFetch(`/shared/${encodeURIComponent(shareCode)}/print`, {
-        method: 'POST',
-        body: JSON.stringify({ mediaId }),
-        signal: options.signal,
-    })
-}
-
-export function redeemPrintSession(sessionToken, options = {}) {
-    return apiFetch('/print/session', {
-        method: 'POST',
-        body: JSON.stringify({ sessionToken }),
         signal: options.signal,
     })
 }

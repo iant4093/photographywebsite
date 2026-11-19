@@ -4,6 +4,7 @@ import PhotoLightbox from './PhotoLightbox'
 import userEvent from '@testing-library/user-event'
 
 vi.mock('../utils/mediaUrls', () => ({
+  cdnDomain: 'media.test',
   mediaBeforeDisplayUrl: image => image?.before?.status === 'ready' ? image.before.url || '' : '',
   mediaBeforeSrcSet: image => (image?.before?.srcSet || []).map(({ url, width }) => `${url} ${width}w`).join(', '),
   mediaDisplayUrl: image => image.url,
@@ -14,6 +15,7 @@ vi.mock('../utils/mediaUrls', () => ({
 const landscape = {
   id: 'landscape',
   url: 'https://media.test/landscape.jpg',
+  downloadUrl: 'https://media.test/albums/test/original/landscape.jpg',
   thumbnailUrl: 'https://media.test/landscape-thumb.jpg',
   width: 1920,
   height: 1280,
@@ -367,25 +369,26 @@ describe('PhotoLightbox', () => {
     expect(onMediaError).toHaveBeenCalledOnce()
   })
 
-  it('offers print ordering only when a caller authorizes the action', async () => {
-    const onPrint = vi.fn().mockResolvedValue(undefined)
+  it('offers an external print link only in a public viewer', () => {
     const { rerender } = render(
       <PhotoLightbox
         images={[landscape]}
         index={0}
         ariaLabel="Printable viewer"
         onClose={vi.fn()}
-        onPrint={onPrint}
+        publicPrint
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Order a print of this photo' }))
-    expect(onPrint).toHaveBeenCalledWith(expect.any(Object), landscape, 0)
+    const order = screen.getByRole('link', { name: 'Order a print of this photo' })
+    expect(order).toHaveAttribute('target', '_blank')
+    expect(order).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(new URL(order.href).searchParams.get('import')).toBe(landscape.downloadUrl)
 
     rerender(
       <PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />,
     )
-    expect(screen.queryByRole('button', { name: 'Order a print of this photo' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Order a print of this photo' })).toBeNull()
   })
 
   it('presents photo downloads as a labeled action button', () => {
@@ -792,14 +795,13 @@ describe('PhotoLightbox', () => {
 
   it('keeps downloads and print orders tied to the edited photo with explicit labels in before mode', () => {
     const onDownload = vi.fn()
-    const onPrint = vi.fn().mockResolvedValue(undefined)
-    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onDownload={onDownload} onPrint={onPrint} />)
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onDownload={onDownload} publicPrint />)
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     fireEvent.load(screen.getByAltText(/^Before editing — /))
     fireEvent.click(screen.getByRole('button', { name: 'Download edited photo' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Order a print of the edited photo' }))
+    const order = screen.getByRole('link', { name: 'Order a print of the edited photo' })
     expect(onDownload).toHaveBeenCalledWith(expect.any(Object), comparisonPhoto, 0)
-    expect(onPrint).toHaveBeenCalledWith(expect.any(Object), comparisonPhoto, 0)
+    expect(new URL(order.href).searchParams.get('import')).toBe(comparisonPhoto.downloadUrl)
   })
 
   it('uses the original-specific refresh callback while routing edited image errors separately', () => {
@@ -869,7 +871,7 @@ describe('PhotoLightbox', () => {
 
   it('uses one comparison button for failure retry and keeps action text and highlighting stable', async () => {
     const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
-    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh, onDownload: vi.fn(), onPrint: vi.fn() }
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh, onDownload: vi.fn(), publicPrint: true }
     const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
     const toggle = screen.getByRole('button', { name: 'Show original photo' })
     const actionButtons = document.querySelector('.linen-lightbox-action-buttons')
@@ -888,7 +890,7 @@ describe('PhotoLightbox', () => {
     expect(beforeWord).toHaveClass('is-active')
     expect(afterWord).not.toHaveClass('is-active')
     expect(screen.getByRole('button', { name: 'Download edited photo' })).toHaveTextContent(/^Download$/)
-    expect(screen.getByRole('button', { name: 'Order a print of the edited photo' })).toHaveTextContent(/^Order a Print$/)
+    expect(screen.getByRole('link', { name: 'Order a print of the edited photo' })).toHaveTextContent(/^Order a Print$/)
 
     rerender(<PhotoLightbox {...props} images={[{ ...comparisonPhoto, before: { status: 'failed' } }]} />)
     expect(screen.getByRole('button', { name: 'Retry original' })).toBe(toggle)

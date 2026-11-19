@@ -48,6 +48,7 @@ from media_access import (
     public_url,
     serialize_album_detail,
     serialize_images,
+    validate_album_media_key,
     validated_preview_keys,
 )
 from featured_photo_pools import featured_images, load_featured_references
@@ -399,6 +400,7 @@ def _explore_item(metadata, album):
         return None
     try:
         image_index = album["images"].index(image)
+        photo_key = validate_album_media_key(image.get("rawKey") or image.get("key"), album=album)
         previews = [
             {
                 "width": width,
@@ -428,6 +430,7 @@ def _explore_item(metadata, album):
         "imageIndex": image_index,
         "id": media_id,
         "url": previews[-1]["url"],
+        "downloadUrl": public_url(photo_key),
         "thumbnailUrl": previews[0]["url"],
         "previewSrcSet": previews,
         "width": int(largest.get("width") or image.get("width") or 0),

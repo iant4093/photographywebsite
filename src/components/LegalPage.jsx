@@ -8,11 +8,11 @@ export function SupportEmail({ subject = '', children }) {
     return <a href={`mailto:${SUPPORT_EMAIL}${subject ? `?subject=${encodeURIComponent(subject)}` : ''}`}>{children || SUPPORT_EMAIL}</a>
 }
 
-export default function LegalPage({ title, children }) {
+export default function LegalPage({ title, updated = LEGAL_UPDATED, children }) {
     return (
         <article className="legal-page max-w-3xl mx-auto px-6 py-16 pt-[104px] md:pt-[120px] text-charcoal-light">
             <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-6">{title}</h1>
-            <p className="text-sm text-warm-gray mb-8">Last updated {LEGAL_UPDATED}</p>
+            <p className="text-sm text-warm-gray mb-8">Last updated {updated}</p>
             <div className="legal-copy">{children}</div>
             <nav className="legal-page-nav" aria-label="Policies and support">
                 <Link to="/privacy">Privacy</Link>

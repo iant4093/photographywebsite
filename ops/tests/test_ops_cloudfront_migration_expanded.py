@@ -54,8 +54,7 @@ class CloudFrontHelperTests(unittest.TestCase):
                 "ContentTypeOptions": {"Override": True},
                 "ContentSecurityPolicy": {},
                 "XSSProtection": {},
-                # The Fotomoto print policy omits FrameOptions; CloudFront
-                # reports it back as an empty object.
+                # CloudFront may report an omitted header as an empty object.
                 "FrameOptions": {},
             },
             "HeadersConfig": {
@@ -317,34 +316,6 @@ class CloudFrontHelperTests(unittest.TestCase):
         self.assertNotIn("ForwardedValues", behavior)
         self.assertEqual(behavior["CachePolicyId"], "immutable")
 
-        print_baseline = {
-            "fotomoto_print": {
-                "content_security_policy_template": "default-src 'none'; img-src {media_origin}",
-                "response_policy_name": "print-policy",
-                "content_security_policy": "default-src 'none'",
-                "permissions_policy": "camera=()",
-            }
-        }
-        self.assertEqual(
-            cloudfront_frontend.render_print_csp(print_baseline, media_domain="media.example"),
-            "default-src 'none'; img-src https://media.example",
-        )
-        for invalid_print_baseline in (
-            {},
-            {"fotomoto_print": {"content_security_policy_template": 42}},
-            {"fotomoto_print": {"content_security_policy_template": "default-src 'none'"}},
-        ):
-            with self.subTest(invalid_print_baseline=invalid_print_baseline), self.assertRaises(
-                SystemExit
-            ):
-                cloudfront_frontend.render_print_csp(
-                    invalid_print_baseline,
-                    media_domain="media.example",
-                )
-        print_policy = cloudfront_frontend.print_policy_config(print_baseline)
-        self.assertEqual(print_policy["Name"], "print-policy")
-        self.assertEqual(print_policy["CustomHeadersConfig"]["Quantity"], 4)
-        self.assertNotIn("FrameOptions", print_policy["SecurityHeadersConfig"])
 
 
 class CloudFrontMainTests(unittest.TestCase):
@@ -500,10 +471,22 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(behaviors["assets/*"]["CachePolicyId"], "immutable-cache")
         self.assertEqual(behaviors["images/*"]["CachePolicyId"], "static-cache")
         self.assertNotIn("CachePolicyId", behaviors["preserve/*"])
-        print_behavior = cloudfront_frontend.cache_behavior(
-            desired["DefaultCacheBehavior"], "print.html", "print-id", self.baseline, cache_policy="html"
+
+    def test_main_retires_the_old_print_behavior_and_alias(self):
+        self.config["Aliases"] = {"Quantity": 3, "Items": [
+            "example.test", "www.example.test", "prints.example.test",
+        ]}
+        self.config["CacheBehaviors"]["Items"].append({
+            "PathPattern": "print.html",
+            "ResponseHeadersPolicyId": "old-print-policy",
+        })
+        _, _, update = self.run_main(
+            "--apply", "--expected-etag", "etag", "--expected-account-id", "123", "--include-www"
         )
-        self.assertEqual(print_behavior["CachePolicyId"], "html-cache")
+        desired = update.call_args.args[1]
+        self.assertEqual(desired["Aliases"]["Items"], ["example.test", "www.example.test"])
+        paths = {item["PathPattern"] for item in desired["CacheBehaviors"]["Items"]}
+        self.assertEqual(paths, {"assets/*", "images/*", "preserve/*"})
 
     def test_main_dry_run_plans_missing_shell_cache_policy_without_creating_it(self):
         def no_custom_policies(arguments):
