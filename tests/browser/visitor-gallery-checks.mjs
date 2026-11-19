@@ -90,11 +90,18 @@ await generation.close()
 const images = Object.fromEntries(Object.entries(encoded).map(([width, bytes]) => [width, Buffer.from(bytes)]))
 fixtureDownload = images[1920]
 
-async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, failModule = false, imageDelay = 0, detailDelay = 0, titleSuffix = '' }) {
+async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, failModule = false, imageDelay = 0, detailDelay = 0, titleSuffix = '', albumPreview = false }) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: width < 500 ? 3 : 1,
         ...(engine !== 'firefox' ? { isMobile: width < 500, hasTouch: width < 500 } : {}), serviceWorkers: 'block' })
     const data = fixture(count), traffic = [], errors = []
     if (titleSuffix) data.items.forEach(album => { album.title += titleSuffix })
+    const albumId = data.items[0].albumId
+    const version = 'a'.repeat(24)
+    const previewRoot = `https://${mediaDomain}/public-previews/${albumId}/v3`
+    const manifestUrl = `${previewRoot}/hover-${version}.json`
+    if (albumPreview) Object.assign(data.items[0], {
+        hoverPreviewStatus: 'ready', hoverPreviewVersion: version, hoverPreviewManifestUrl: manifestUrl,
+    })
     await context.addInitScript(({ items }) => {
         if (window.top !== window || !['http:', 'https:'].includes(location.protocol)) return
         localStorage.setItem('ian-photography-analytics', 'disabled')
@@ -144,6 +151,13 @@ async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, 
             return route.fulfill({ contentType: 'image/webp', headers: { 'access-control-allow-origin': '*' }, body: images[width] || images[1920] }).catch(() => {})
         }
         if (url.hostname === mediaDomain && url.pathname.endsWith('.json')) {
+            if (albumPreview && url.href === manifestUrl) return route.fulfill({
+                headers: { 'access-control-allow-origin': '*' },
+                json: {
+                    schemaVersion: 1, albumId, version,
+                    images: ['b', 'c', 'd'].map(key => ({ url: `${previewRoot}/${key.repeat(24)}-w640.webp`, width: 640, height: 427 })),
+                },
+            })
             return route.fulfill({ status: 404, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{}' })
         }
         if (/\/PhotoLightbox-[^/]+\.js$/.test(url.pathname)) {
@@ -863,6 +877,41 @@ async function mobileAlbumHeaderCase() {
             await share.waitFor({ state: 'hidden' })
         }
         outcomes.push({ name: 'mobile-album-header', width: 390 })
+    } finally { await context.close() }
+}
+
+async function mobileScrollAndAutoplayCase() {
+    const { context, page, cdp, traffic, errors } = await openCase({ width: 390, albumPreview: true })
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        const albumId = fixture(1).items[0].albumId
+        const card = page.locator(`.catalog-section .album-card[href="/album/${albumId}"]`)
+        const centered = () => card.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+        await centered()
+        await page.waitForFunction(() => [...document.querySelectorAll('.catalog-section .album-card')]
+            .some(node => node.matches('.editorial-timeline, .is-motion-visible')))
+        const before = await card.evaluate(node => getComputedStyle(node).transform)
+        await page.evaluate(() => scrollBy({ top: 135, behavior: 'instant' }))
+        await page.waitForFunction(({ href, previous }) => {
+            const node = document.querySelector(`.catalog-section .album-card[href="${href}"]`)
+            const transform = node && getComputedStyle(node).transform
+            return transform && transform !== 'none' && transform !== previous
+        }, { href: '/album/' + albumId, previous: before })
+        await centered()
+
+        const preview = card.locator('.album-card-photo-preview')
+        await preview.first().waitFor({ state: 'attached' })
+        const firstSource = await preview.first().getAttribute('src')
+        await page.waitForFunction(firstSource => [...document.querySelectorAll('.album-card-photo-preview')]
+            .some(image => image.src !== firstSource && Number(getComputedStyle(image).opacity) > .4), firstSource)
+        await page.evaluate(() => scrollBy({ top: 50, behavior: 'instant' }))
+        await preview.first().waitFor({ state: 'detached' })
+        assert.ok(traffic.some(request => /\/hover-[a-f0-9]+\.json$/.test(request.path)))
+        assert.ok(!traffic.some(request => request.path.endsWith('/public/albums/' + albumId)),
+            'Autoplay uses the small manifest without fetching the full album')
+        assert.deepEqual(errors, [])
+        const result = { engine, width: 390, check: 'phone catalog scroll motion and idle slideshow, with immediate cancellation on scroll', passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }
 
@@ -1951,6 +2000,7 @@ try {
         await pageFadeCase(width)
         if (width < 500) {
             await mobileAlbumHeaderCase()
+            await mobileScrollAndAutoplayCase()
             await mobileMediaMotionCase()
         } else {
             await routeCardMotionCase(width)

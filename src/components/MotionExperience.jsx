@@ -45,15 +45,17 @@ function clearMotionStyles(target) {
 
 // Scroll-linked poses at the ends of an element's pass through the viewport,
 // matching update() below; CSS interpolates them through the centred rest pose.
-function setTimelinePose(target, isMedia, position, catalog) {
+function setTimelinePose(target, isMedia, position, catalog, touch) {
     const offset = position - 1
     const amplitude = isMedia ? 1 : 0.76
     const card = isMedia && target.matches('.album-card, .linen-media-frame')
     const y = card ? (catalog ? -32 : -16) : (catalog ? -44 : -52 * amplitude)
     const scale = card ? (catalog ? 0.87 : 0.978) : (catalog ? 0.93 : 0.95)
     setMotionStyle(target, 'tl-y', y, 'px')
-    setMotionStyle(target, 'tl-x', catalog ? 0 : offset * 0.28 * 36 * amplitude, 'px')
-    setMotionStyle(target, 'tl-r', catalog ? 0 : offset * (card ? 0.62 : 0.72 * amplitude), 'deg', 3)
+    if (!touch) {
+        setMotionStyle(target, 'tl-x', catalog ? 0 : offset * 0.28 * 36 * amplitude, 'px')
+        setMotionStyle(target, 'tl-r', catalog ? 0 : offset * (card ? 0.62 : 0.72 * amplitude), 'deg', 3)
+    }
     setMotionStyle(target, 'tl-s0', scale + 0.72 * (1 - scale), '', 5)
 }
 
@@ -182,7 +184,7 @@ export default function MotionExperience() {
         let targets = []
         let rowTargets = []
         const metadata = new Map()
-        let layoutDirty = !touchViewport
+        let layoutDirty = true
         let viewportDirty = true
         let layoutWidth = window.innerWidth
         let motionHeight = 1
@@ -199,28 +201,44 @@ export default function MotionExperience() {
         // iOS Safari resizes the viewport as its toolbars collapse and expand
         // mid-scroll. Poses follow the large viewport, which stays fixed, so
         // the toolbar cannot shift every card at once.
-        const viewportProbe = touchViewport ? null : document.createElement('div')
-        if (viewportProbe) {
-            viewportProbe.setAttribute('aria-hidden', 'true')
-            viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none'
-            document.body.append(viewportProbe)
-        }
+        const viewportProbe = document.createElement('div')
+        viewportProbe.setAttribute('aria-hidden', 'true')
+        viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none'
+        document.body.append(viewportProbe)
 
         const requestUpdate = () => {
             if (!document.hidden && updateFrame === null) updateFrame = window.requestAnimationFrame(update)
         }
 
-        const visibilityObserver = touchViewport || typeof IntersectionObserver === 'undefined'
+        const scrollPhase = (info, scrollY) => {
+            const height = Math.min(Math.max(info.height, 1), motionHeight)
+            return clamp((motionHeight - (info.top - scrollY)) / (motionHeight + height), 0, 1) * 2 - 1
+        }
+        const updateTouchTarget = (target, info, scrollY) => {
+            const phase = scrollPhase(info, scrollY)
+            const travel = info.isCard ? (usesCatalogMotion ? -32 : -16)
+                : (usesCatalogMotion ? -44 : -52 * (info.isMedia ? 1 : .76))
+            const amplitude = info.isCard ? (usesCatalogMotion ? .13 : .022) : (usesCatalogMotion ? .07 : .05)
+            setMotionStyle(target, 'y', phase * travel, 'px')
+            setMotionStyle(target, 'scale', 1 - Math.abs(phase) * .28 * amplitude, '', 5)
+        }
+        const visibilityObserver = typeof IntersectionObserver === 'undefined'
             ? null
             : new IntersectionObserver((entries) => {
+                const scrollY = window.scrollY
                 entries.forEach((entry) => {
-                    if (!metadata.has(entry.target)) return
-                    if (entry.isIntersecting) activeTargets.add(entry.target)
-                    else activeTargets.delete(entry.target)
+                    const info = metadata.get(entry.target)
+                    if (!info) return
+                    if (entry.isIntersecting) {
+                        activeTargets.add(entry.target)
+                        // Prepare a clipped card before revealing it, including
+                        // engines without horizontal observer overscan.
+                        if (touchViewport && !timelineMotion && info.top !== undefined) updateTouchTarget(entry.target, info, scrollY)
+                    } else activeTargets.delete(entry.target)
                     entry.target.classList.toggle(visibleClass, entry.isIntersecting)
                 })
                 requestUpdate()
-            }, { rootMargin: '160px 0px', threshold: 0 })
+            }, { rootMargin: '160px 0px', scrollMargin: touchViewport ? '0px 160px' : '0px', threshold: 0 })
 
         const collectTargets = () => {
             collectFrame = null
@@ -249,9 +267,10 @@ export default function MotionExperience() {
                     target.classList.add('editorial-motion-frame', `editorial-index-${position}`)
                 }
                 if (!previous || previous.isMedia !== isMedia) target.classList.toggle('editorial-motion-media', isMedia)
-                metadata.set(target, { ...previous, position, isMedia, inScrollRow: Boolean(target.closest('[data-scroll-row]')) })
-                if (timelineMotion) setTimelinePose(target, isMedia, position, usesCatalogMotion)
-                else if (usesCatalogMotion) {
+                const isCard = isMedia && target.matches('.album-card, .linen-media-frame')
+                metadata.set(target, { ...previous, position, isMedia, isCard, inScrollRow: !touchViewport && Boolean(target.closest('[data-scroll-row]')) })
+                if (timelineMotion) setTimelinePose(target, isMedia, position, usesCatalogMotion, touchViewport)
+                else if (usesCatalogMotion && !touchViewport) {
                     setMotionStyle(target, 'x', 0, 'px', 0)
                     setMotionStyle(target, 'card-rotation', 0, 'deg', 0)
                     setMotionStyle(target, 'rotation', 0, 'deg', 0)
@@ -285,7 +304,7 @@ export default function MotionExperience() {
             updateFrame = null
             const viewportHeight = Math.max(window.innerHeight, 1)
             const scrollY = window.scrollY
-            if (viewportProbe && (layoutDirty || viewportDirty)) {
+            if (layoutDirty || viewportDirty) {
                 const stableHeight = Math.max(viewportProbe.offsetHeight || viewportHeight, 1)
                 const width = window.innerWidth
                 if (width !== layoutWidth || stableHeight !== motionHeight) layoutDirty = true
@@ -352,12 +371,14 @@ export default function MotionExperience() {
                 }
             }
 
-            if (touchViewport || timelineMotion) return
+            if (timelineMotion) return
+            if (touchViewport) {
+                activeTargets.forEach(target => updateTouchTarget(target, metadata.get(target), scrollY))
+                return
+            }
 
             const updateTarget = (target, info) => {
-                const measuredHeight = Math.min(Math.max(info.height, 1), motionHeight)
-                const progress = clamp((motionHeight - (info.top - scrollY)) / (motionHeight + measuredHeight), 0, 1)
-                const phase = (progress - 0.5) * 2
+                const phase = scrollPhase(info, scrollY)
                 const presence = clamp(1 - Math.abs(phase) * 0.28, 0.72, 1)
                 const position = info.position - 1
                 const isMedia = info.isMedia
@@ -393,12 +414,10 @@ export default function MotionExperience() {
             }
         }
 
-        // Touch scrolling stays native. Keep the film strip while leaving the
-        // gallery cards at rest between taps, including on WebKit's JS fallback.
-        const mutationObserver = touchViewport ? null : new MutationObserver(records => {
+        const mutationObserver = new MutationObserver(records => {
             if (changesMotionTargets(records)) requestCollection()
         })
-        mutationObserver?.observe(main, { childList: true, subtree: true })
+        mutationObserver.observe(main, { childList: true, subtree: true })
         // Image swaps inside fixed media frames do not alter the motion target
         // set. Observe actual page-size changes without recollecting every card.
         const refreshLayout = () => {
@@ -417,19 +436,18 @@ export default function MotionExperience() {
             } else onResize()
         }
         const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(entries => {
-            if (!touchViewport && (!entries || entries.some(entry => entry.target === main))) refreshLayout()
+            if (!entries || entries.some(entry => entry.target === main)) refreshLayout()
             else refreshViewport()
         })
         layoutObserver?.observe(main)
         if (progressRail) layoutObserver?.observe(progressRail)
-        if (touchViewport) requestUpdate()
-        else collectTargets()
+        collectTargets()
         window.addEventListener('scroll', requestUpdate, { passive: true })
         window.addEventListener('resize', onResize)
         document.addEventListener('visibilitychange', onVisibilityChange)
 
         return () => {
-            mutationObserver?.disconnect()
+            mutationObserver.disconnect()
             visibilityObserver?.disconnect()
             layoutObserver?.disconnect()
             window.removeEventListener('scroll', requestUpdate)
@@ -438,7 +456,7 @@ export default function MotionExperience() {
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)
             targets.forEach(clearMotionStyles)
-            viewportProbe?.remove()
+            viewportProbe.remove()
             root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
             // Preserve the handle position until the next route measures its layout.
         }
