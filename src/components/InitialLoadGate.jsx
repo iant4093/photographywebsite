@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useLocation } from 'react-router'
 
 const MIN_VISIBLE_MS = 350
 const HERO_WAIT_MS = 1600
@@ -7,6 +8,7 @@ const FADE_MS = 240
 // This lives inside the route Suspense boundary, so it only runs once the
 // initial page has actually committed instead of exposing an empty shell.
 export default function InitialLoadGate() {
+    const { pathname } = useLocation()
     useEffect(() => {
         const loader = document.getElementById('initial-loader')
         if (!loader || loader.classList.contains('is-leaving')) return undefined
@@ -45,5 +47,5 @@ export default function InitialLoadGate() {
         }
     }, [])
 
-    return null
+    return <span hidden data-route-content={pathname} />
 }

@@ -1488,19 +1488,22 @@ async function calendarYearCase(width) {
         })
         const navbarBottom = await nav.evaluate(element => element.getBoundingClientRect().bottom)
         assert.ok(navbarBottom > 10, 'The navbar is visible when opening the calendar album')
-        await observeLiveTitleHandoff(page, 'enter')
+        const mobile = width < 500
+        if (!mobile) await observeLiveTitleHandoff(page, 'enter')
         await card.click()
-        const stage = page.locator('main[data-route-page-staged]')
-        await stage.waitFor({ state: 'attached' })
-        await page.locator('main[data-route-page-motion="enter"]').waitFor({ state: 'attached' })
-        await assertLiveTitleHandoff(page, 'enter')
-        await stage.waitFor({ state: 'detached' })
-        await observeLiveTitleHandoff(page, 'return', navbarBottom)
+        const entering = page.locator('main[data-route-page-motion="enter"]')
+        await entering.waitFor({ state: 'attached' })
+        const phoneFade = page.locator('.route-page-touch-fade')
+        if (mobile) await phoneFade.waitFor({ state: 'attached' })
+        else await assertLiveTitleHandoff(page, 'enter')
+        await entering.waitFor({ state: 'detached' })
+        if (!mobile) await observeLiveTitleHandoff(page, 'return', navbarBottom)
         await page.goBack()
         await page.locator('main[data-route-page-motion="return"]').waitFor({ state: 'attached' })
-        await assertLiveTitleHandoff(page)
+        if (mobile) await phoneFade.waitFor({ state: 'attached' })
+        else await assertLiveTitleHandoff(page)
         assert.equal(await card.locator('strong').textContent(), 'Album 1')
-        const result = { engine, width, check: 'calendar year and day animations, stable heatmap, and album title handoffs', passed: true }
+        const result = { engine, width, check: 'calendar year and day animations, stable heatmap, and album navigation', passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }

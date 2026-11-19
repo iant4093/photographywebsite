@@ -1,6 +1,7 @@
 import { act, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import InitialLoadGate from './InitialLoadGate'
+import { MemoryRouter } from 'react-router'
 
 describe('initial load screen', () => {
     beforeEach(() => {
@@ -18,7 +19,7 @@ describe('initial load screen', () => {
         const hero = document.createElement('img')
         hero.className = 'home-hero-media'
         document.getElementById('main-content').appendChild(hero)
-        render(<InitialLoadGate />)
+        render(<MemoryRouter><InitialLoadGate /></MemoryRouter>)
 
         act(() => vi.advanceTimersByTime(500))
         expect(document.getElementById('initial-loader')).toBeInTheDocument()
@@ -30,7 +31,7 @@ describe('initial load screen', () => {
 
     it('keeps a fast non-hero page visible only after the brief opening animation', () => {
         vi.mocked(performance.now).mockReturnValue(0)
-        render(<InitialLoadGate />)
+        render(<MemoryRouter><InitialLoadGate /></MemoryRouter>)
 
         act(() => vi.advanceTimersByTime(349))
         expect(document.getElementById('initial-loader')).toBeInTheDocument()
@@ -43,7 +44,7 @@ describe('initial load screen', () => {
         const hero = document.createElement('img')
         hero.className = 'video-hero-media'
         document.getElementById('main-content').appendChild(hero)
-        render(<InitialLoadGate />)
+        render(<MemoryRouter><InitialLoadGate /></MemoryRouter>)
 
         act(() => vi.advanceTimersByTime(1600))
         act(() => vi.runAllTimers())

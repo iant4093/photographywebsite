@@ -82,7 +82,7 @@ function createRetentionObserver() {
                 const record = records.get(element)
                 return !record.viewportKnown || (record.inViewport && priorityLoading.has(element))
             })) return
-            const limit = touch ? Math.min(1, backgroundLoadLimit()) : backgroundLoadLimit()
+            const limit = Math.min(backgroundLoadLimit(), touch ? 1 : 2)
             for (const element of priorityWaiting) {
                 if (priorityLoading.size >= limit) break
                 startPriorityLoad(element)
