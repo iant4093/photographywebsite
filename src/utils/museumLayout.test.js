@@ -6,7 +6,6 @@ import {
     initialMuseumRoomIds,
     MUSEUM_DIMENSIONS,
     MUSEUM_ARTWORK_SURFACES,
-    museumArtworkDetailWidth,
     museumArtworkLightIndex,
     museumCeilingLightPose,
     museumEndWallPlacardPose,
@@ -560,20 +559,6 @@ describe('museum layout', () => {
         expect(museumRoomGateOpen({ active: true, requested: true, baseReady: false })).toBe(true)
         expect(museumRoomGateOpen({ active: false, requested: true, baseReady: true })).toBe(false)
         expect(museumRoomGateOpen({ active: true, requested: true, baseReady: true })).toBe(true)
-    })
-
-    it('uses a single close inspection tier without retaining it at room distance', () => {
-        expect(museumArtworkDetailWidth(30)).toBe(0)
-        expect(museumArtworkDetailWidth(23.9)).toBe(640)
-        expect(museumArtworkDetailWidth(25, { currentWidth: 640 })).toBe(640)
-        expect(museumArtworkDetailWidth(25)).toBe(0)
-        expect(museumArtworkDetailWidth(3.1, { focused: true })).toBe(1440)
-        expect(museumArtworkDetailWidth(3.1, { focused: true, inspectionWidth: 960 })).toBe(960)
-        expect(museumArtworkDetailWidth(5.2, { focused: true })).toBe(1440)
-        expect(museumArtworkDetailWidth(6.3, { focused: true })).toBe(640)
-        expect(museumArtworkDetailWidth(3.1, { focused: false, currentWidth: 1440 })).toBe(640)
-        expect(museumArtworkDetailWidth(12, { currentWidth: 1440 })).toBe(640)
-        expect(museumArtworkDetailWidth(28, { currentWidth: 1440 })).toBe(0)
     })
 
     it('keeps the nearest doorway pair resident for a stable bay handoff', () => {

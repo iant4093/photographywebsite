@@ -4,6 +4,7 @@ import { museumGalleryDisplays } from './museumDecor'
 import { createMuseumReceptionDesk } from './museumReceptionDesk'
 
 export const MUSEUM_DIMENSIONS = Object.freeze({
+    eyeHeight: 1.94,
     hallHalfWidth: 4.8,
     hallHeight: 8.5,
     hallWallThickness: 0.32,
@@ -65,6 +66,8 @@ export function museumDoorAssemblyPose(side, centerZ) {
         sign: [side * (surface + MUSEUM_PORTAL.signRear), MUSEUM_PORTAL.signHeight, centerZ],
     }
 }
+
+export const MUSEUM_FRAME_SIZE = [3.24, 2.34, 0.14]
 
 export const MUSEUM_ARTWORK_SURFACES = Object.freeze({
     backing: -0.08,
@@ -368,7 +371,7 @@ export function buildMuseumLayout(categories = []) {
         rooms,
         hallBackZ,
         hallLength: MUSEUM_DIMENSIONS.lobbyFrontZ - hallBackZ,
-        spawn: [0, 1.7, 11.25],
+        spawn: [0, MUSEUM_DIMENSIONS.eyeHeight, 11.25],
         desk,
         dressing,
         obstacles,
@@ -382,7 +385,7 @@ function insideRect(x, z, rect, radius = 0) {
         && z <= rect.maxZ - radius
 }
 
-function intersectsObstacle(x, z, obstacle, radius) {
+export function intersectsObstacle(x, z, obstacle, radius) {
     const [ox, , oz] = obstacle.position
     const [width, , depth] = obstacle.size
     const rotation = Number(obstacle.rotationY) || 0
@@ -564,23 +567,6 @@ export function museumRoomGateOpen({ active = false, requested = false } = {}) {
     // and blurhash/colour placeholders are already resident, so the singular
     // approached curtain may animate immediately while compact covers finish.
     return Boolean(active && requested)
-}
-
-export function museumArtworkDetailWidth(distance, {
-    focused = false,
-    currentWidth = 0,
-    inspectionWidth = 1440,
-} = {}) {
-    const numericDistance = Number(distance)
-    if (!Number.isFinite(numericDistance) || numericDistance < 0) return 0
-    if (focused && numericDistance <= 6.2) {
-        return Number(inspectionWidth) >= 1440 ? 1440 : 960
-    }
-    // A three-metre release band prevents a painting at the boundary from
-    // repeatedly mounting and cancelling its 640px upgrade while the camera
-    // sways or the visitor takes a small step.
-    const nearLimit = Number(currentWidth) >= 640 ? 27 : 24
-    return numericDistance <= nearLimit ? 640 : 0
 }
 
 export function museumCeilingLightPose(x, z, fixtureCeilingY) {

@@ -1,3 +1,4 @@
+import { isAlbumPositionWalkable, moveInAlbumWing } from './museumAlbumWing'
 import { isMuseumPositionWalkable, moveMuseumPosition } from './museumLayout'
 
 export const MUSEUM_WHEELCHAIR = Object.freeze({
@@ -9,18 +10,22 @@ export const MUSEUM_WHEELCHAIR = Object.freeze({
 })
 
 export function createMuseumWheelchairs(layout) {
-    return [-0.95, 0.95].map((x, index) => ({
+    const spots = layout.bays ? [
+        [-2.05, layout.bays[0].back + 1.5, 0],
+        [2.05, layout.bays.at(-1).front - 1.5, Math.PI],
+    ] : [-0.95, 0.95].map(x => [x, layout.desk.position[2] - 2.7, 0])
+    return spots.map(([x, z, yaw], index) => ({
         id: `wheelchair-${index + 1}`,
         kind: 'wheelchair',
-        position: [x, 0, layout.desk.position[2] - 2.7],
+        position: [x, 0, z],
         size: [1.12, 1.15, 1.45],
-        rotationY: 0,
+        rotationY: yaw,
         wheelAngle: 0,
     }))
 }
 
 export function museumWheelchairCollisionLayout(layout, chairs, riddenId = null) {
-    return { ...layout, obstacles: [...layout.obstacles, ...chairs.filter(chair => chair.id !== riddenId).map(chair => ({
+    return { ...layout, obstacles: [...(layout.obstacles || []), ...chairs.filter(chair => chair.id !== riddenId).map(chair => ({
         ...chair,
         // The legacy obstacle helper rotates world offsets into local axes
         // with the opposite sign from Three.js's rendered Y rotation.
@@ -44,7 +49,8 @@ export function focusedMuseumWheelchair(chairs, position, forward) {
 }
 
 export function museumWheelchairPathClear(layout, chairs, chair, from, to, passableRoomIds) {
-    const reached = moveMuseumPosition(
+    const move = layout.bays ? moveInAlbumWing : moveMuseumPosition
+    const reached = move(
         museumWheelchairCollisionLayout(layout, chairs, chair.id), from,
         { x: to.x - from.x, z: to.z - from.z }, 0.35, passableRoomIds,
     )
@@ -53,6 +59,7 @@ export function museumWheelchairPathClear(layout, chairs, chair, from, to, passa
 
 export function museumWheelchairExitPosition(layout, chairs, chair, passableRoomIds = null) {
     const collisionLayout = museumWheelchairCollisionLayout(layout, chairs)
+    const walkable = layout.bays ? isAlbumPositionWalkable : isMuseumPositionWalkable
     // Try either side, then behind and ahead. Never stand inside furniture or
     // leave the visitor trapped between a chair and a wall.
     for (const [x, z] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.5, 1.5], [-1.5, 1.5], [1.5, -1.5], [-1.5, -1.5]]) {
@@ -62,7 +69,7 @@ export function museumWheelchairExitPosition(layout, chairs, chair, passableRoom
             x: chair.position[0] + x * cosine + z * sine,
             z: chair.position[2] - x * sine + z * cosine,
         }
-        if (isMuseumPositionWalkable(collisionLayout, position.x, position.z, 0.35)
+        if (walkable(collisionLayout, position.x, position.z, 0.35)
             && museumWheelchairPathClear(layout, chairs, chair,
                 { x: chair.position[0], z: chair.position[2] }, position, passableRoomIds)) return position
     }

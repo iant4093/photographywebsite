@@ -1,3 +1,4 @@
+import { buildMuseumAlbumWing, isAlbumPositionWalkable, moveInAlbumWing } from './museumAlbumWing'
 import { describe, expect, it } from 'vitest'
 import { buildMuseumCatalog, buildMuseumLayout, isMuseumPositionWalkable, moveMuseumPosition } from './museumLayout'
 import { createMuseumWheelchairs, focusedMuseumWheelchair, MUSEUM_WHEELCHAIR, museumWheelchairCollisionLayout, museumWheelchairExitPosition, museumWheelchairPathClear } from './museumWheelchairs'
@@ -22,6 +23,22 @@ describe('museum wheelchairs', () => {
             const exit = museumWheelchairExitPosition(layout, chairs, chair)
             expect(exit).not.toBeNull()
             expect(isMuseumPositionWalkable(museumWheelchairCollisionLayout(layout, chairs), exit.x, exit.z)).toBe(true)
+        }
+    })
+
+    it('parks a rideable chair beside each album arch and keeps turbo movement inside it', () => {
+        const wing = buildMuseumAlbumWing({ albumId: 'alpine' }, Array(12).fill({}))
+        const chairs = createMuseumWheelchairs(wing)
+        expect(chairs[0].position[0]).toBeLessThan(0)
+        expect(chairs[1].position[0]).toBeGreaterThan(0)
+        for (const chair of chairs) {
+            const free = museumWheelchairCollisionLayout(wing, chairs, chair.id)
+            const [x, , z] = chair.position
+            expect(isAlbumPositionWalkable(free, x, z, MUSEUM_WHEELCHAIR.radius)).toBe(true)
+            expect(isAlbumPositionWalkable(museumWheelchairCollisionLayout(wing, chairs), x, z)).toBe(false)
+            expect(museumWheelchairExitPosition(wing, chairs, chair)).not.toBeNull()
+            const travel = chair === chairs[0] ? -8 : 8
+            expect(Math.abs(moveInAlbumWing(free, { x, z }, { x: 0, z: travel }, 0.9).z - z)).toBeLessThan(1.5)
         }
     })
 

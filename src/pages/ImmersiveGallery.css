@@ -60,31 +60,8 @@
   animation: museum-loading-sweep 1.25s ease-in-out infinite;
 }
 
-.museum-loading-progress--determinate > i {
-  inset: 0;
-  width: 100%;
-  transform-origin: left center;
-  background: linear-gradient(90deg, #8d623e, #d2a575);
-  animation: none;
-  transition: transform 160ms ease-out;
-}
-
-.museum-loading-progress--determinate::after {
-  position: absolute;
-  inset-block: 0;
-  left: -24%;
-  width: 24%;
-  background: linear-gradient(90deg, transparent, rgba(255, 238, 210, 0.82), transparent);
-  content: '';
-  animation: museum-loading-determinate-sweep 1.4s ease-in-out infinite;
-}
-
 @keyframes museum-loading-sweep {
   to { transform: translateX(365%); }
-}
-
-@keyframes museum-loading-determinate-sweep {
-  to { transform: translateX(520%); }
 }
 
 .museum-experience {
@@ -111,15 +88,16 @@
   inset: 0;
 }
 
-.museum-preview-album {
-  position: fixed;
-  z-index: 15;
-  right: 1rem;
-  bottom: 1rem;
-  padding: 0.7rem 1rem;
-  border: 1px solid #bba687;
-  background: #171411;
-  color: #eee8dc;
+.museum-drag-look {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  cursor: grab;
+  touch-action: none;
+}
+
+.museum-drag-look:active {
+  cursor: grabbing;
 }
 
 .museum-renderer-recovery {
@@ -730,3 +708,34 @@
 }
 
 .museum-experience--touch .museum-wheelchair-hud { bottom: 215px; }
+
+.museum-portal-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+  --portal-radius: 145vmax;
+  background: radial-gradient(circle at center, transparent max(0px, var(--portal-radius)), #171411 calc(var(--portal-radius) + 1.5vmax));
+}
+
+.museum-portal-veil--fade {
+  background: #171411;
+  opacity: 0;
+}
+
+.museum-portal-status {
+  position: absolute;
+  z-index: 24;
+  bottom: 9rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.75rem 1.1rem;
+  background: #211c18ee;
+  color: #f3eadc;
+  text-align: center;
+}
+
+.museum-portal-status button {
+  margin-inline-start: 0.65rem;
+  text-decoration: underline;
+}

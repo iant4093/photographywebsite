@@ -5,7 +5,7 @@ import {
     museumArtworkBlend,
     museumArtworkFallbackWidths,
     museumArtworkPreviewCandidates,
-    museumArtworkRequestWidth,
+    MUSEUM_APPROACH_PRIORITY,
     museumArtworkTransitionProgress,
     museumCoverLoadAllowed,
     museumCoverUploadAllowed,
@@ -30,45 +30,36 @@ describe('museum artwork streaming', () => {
     })
 
     it('keeps larger upgrades and background uploads off movement frames', () => {
-        for (const width of [0, 640, 960, 1440]) {
+        for (const width of [0, 1440, 1920]) {
             expect(museumCoverUploadAllowed({ ...visibleBase, width })).toBe(false)
         }
         expect(museumCoverUploadAllowed({ ...visibleBase, priority: 500 })).toBe(false)
         expect(museumCoverUploadAllowed({ ...visibleBase, inputPending: true })).toBe(false)
-        expect(museumCoverUploadAllowed({ width: 1440, interactionBusy: false })).toBe(true)
+        expect(museumCoverUploadAllowed({ width: 1920, interactionBusy: false })).toBe(true)
     })
 
     it('backs off after a slow upload without starving the next preview', () => {
         expect(museumCoverUploadAllowed({ ...visibleBase, lastUploadDuration: 20, sinceLastUpload: 200 })).toBe(false)
-        expect(museumCoverUploadAllowed({ ...visibleBase, lastUploadDuration: 20, sinceLastUpload: 320 })).toBe(true)
-    })
-
-    it('stages a fast medium photograph before a cold close inspection', () => {
-        expect(museumArtworkRequestWidth(1440, 0)).toBe(640)
-        expect(museumArtworkRequestWidth(960, 256)).toBe(640)
-        expect(museumArtworkRequestWidth(1440, 640)).toBe(1440)
-        expect(museumArtworkRequestWidth(1440, 1440)).toBe(1440)
-        expect(museumArtworkRequestWidth(640, 1440)).toBe(640)
-        expect(museumArtworkRequestWidth(0, 640)).toBe(0)
+        expect(museumCoverUploadAllowed({ ...visibleBase, lastUploadDuration: 20, sinceLastUpload: 330 })).toBe(true)
     })
 
     it('shows the best uploaded intermediate on a revisit while a sharper image loads', () => {
-        expect(museumArtworkFallbackWidths(1440)).toEqual([1440, 640, 256])
-        expect(museumArtworkFallbackWidths(960)).toEqual([960, 640, 256])
-        expect(museumArtworkFallbackWidths(640)).toEqual([640, 256])
-        expect(museumArtworkFallbackWidths(256)).toEqual([256])
+        expect(museumArtworkFallbackWidths(1920)).toEqual([1920, 960])
+        expect(museumArtworkFallbackWidths(1440)).toEqual([1440, 960])
+        expect(museumArtworkFallbackWidths(960)).toEqual([960])
+        expect(museumArtworkFallbackWidths(512)).toEqual([512])
         expect(museumArtworkFallbackWidths(0)).toEqual([])
     })
 
-    it('keeps foreground detail out of movement even after raising its queue priority', () => {
-        for (const width of [640, 960, 1440]) {
-            expect(museumCoverLoadAllowed({ width, priority: 9900, interactionBusy: true })).toBe(false)
-            expect(museumCoverLoadAllowed({ width, priority: 9900 })).toBe(true)
-            expect(museumCoverUploadAllowed({ width, priority: 9900, interactionBusy: true })).toBe(false)
+    it('uploads approached high-resolution prints during movement at a slower cadence', () => {
+        for (const width of [1440, 1920]) {
+            const approached = { width, priority: MUSEUM_APPROACH_PRIORITY, interactionBusy: true }
+            expect(museumCoverLoadAllowed(approached)).toBe(true)
+            expect(museumCoverUploadAllowed({ ...approached, sinceLastUpload: 120 })).toBe(false)
+            expect(museumCoverUploadAllowed({ ...approached, sinceLastUpload: 260 })).toBe(true)
+            expect(museumCoverUploadAllowed({ ...approached, inputPending: true })).toBe(false)
+            expect(museumCoverLoadAllowed({ ...approached, priority: 800 })).toBe(false)
         }
-        expect(museumCoverLoadAllowed({ ...visibleBase, inputPending: true })).toBe(false)
-        expect(museumCoverLoadAllowed(visibleBase)).toBe(true)
-        expect(museumCoverLoadAllowed({ width: 256, priority: 100, interactionBusy: true })).toBe(false)
     })
 
     it('eases the entire quality transition without a start or end flash', () => {
@@ -100,17 +91,17 @@ describe('museum artwork streaming', () => {
         const candidate = (id, distance, facing, visible = false) => ({ painting: { id }, distance, facing, visible })
         const candidates = [
             candidate('behind', 12, -0.8),
-            candidate('ahead', 23, 0.65),
+            candidate('ahead', 32, 0.65),
             candidate('side', 7, -0.1),
             candidate('visible', 9, 0.6, true),
-            candidate('too-far', 25, 0.7, true),
+            candidate('too-far', 38, 0.7, true),
             candidate('invalid', NaN, 1, true),
         ]
         expect(museumArtworkPreviewCandidates(candidates).map(item => item.painting.id))
             .toEqual(['visible', 'side', 'ahead'])
         expect(museumArtworkPreviewCandidates(candidates, new Set(['too-far'])).map(item => item.painting.id))
             .toContain('too-far')
-        expect(museumArtworkPreviewCandidates([candidate('released', 28, 1, true)], new Set(['released'])))
+        expect(museumArtworkPreviewCandidates([candidate('released', 41, 1, true)], new Set(['released'])))
             .toEqual([])
     })
 

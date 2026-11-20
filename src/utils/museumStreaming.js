@@ -1,29 +1,21 @@
-// Keep the only uploads allowed during navigation small and evenly spaced.
-// Detail textures still wait for idle time; base photographs must make progress
-// even when a visitor holds W for the entire length of an archive room.
-export const MUSEUM_BASE_COVER_WIDTH = 256
+export const MUSEUM_BASE_COVER_WIDTH = 960
 export const MUSEUM_VISIBLE_COVER_PRIORITY = 9000
-export const MUSEUM_NEAR_COVER_WIDTH = 640
+export const MUSEUM_APPROACH_PRIORITY = 11000
+export const MUSEUM_INSPECTION_COVER_WIDTH = 1920
+export const MUSEUM_LOW_POWER_INSPECTION_WIDTH = 1440
 export const MUSEUM_DETAIL_BLEND_SECONDS = 0.65
 
 export function museumArtworkFallbackWidths(targetWidth) {
-    return [...new Set([targetWidth, MUSEUM_NEAR_COVER_WIDTH, MUSEUM_BASE_COVER_WIDTH])]
+    return [...new Set([targetWidth, MUSEUM_BASE_COVER_WIDTH])]
         .filter(width => width > 0 && width <= targetWidth)
 }
 
 export function museumCoverLoadAllowed({ width = 0, priority = 0, interactionBusy = false, inputPending = false } = {}) {
     if (inputPending) return false
-    return !interactionBusy || (
-        width > 0 && width <= MUSEUM_BASE_COVER_WIDTH && priority >= MUSEUM_VISIBLE_COVER_PRIORITY
-    )
-}
-
-export function museumArtworkRequestWidth(targetWidth, preparedWidth = 0) {
-    // A close arrival must get the small, usually HTTP-cached 640px image
-    // before waiting for the full inspection source to decode and upload.
-    return targetWidth > MUSEUM_NEAR_COVER_WIDTH && preparedWidth < MUSEUM_NEAR_COVER_WIDTH
-        ? MUSEUM_NEAR_COVER_WIDTH
-        : targetWidth
+    if (!interactionBusy) return true
+    if (width <= 0) return false
+    if (width <= MUSEUM_BASE_COVER_WIDTH) return priority >= MUSEUM_VISIBLE_COVER_PRIORITY
+    return width <= MUSEUM_INSPECTION_COVER_WIDTH && priority >= MUSEUM_APPROACH_PRIORITY
 }
 
 export function museumArtworkBlend(elapsed, duration = MUSEUM_DETAIL_BLEND_SECONDS) {
@@ -44,8 +36,8 @@ export function museumArtworkPreviewCandidates(candidates, currentIds = new Set(
     // distant photographs behind the visitor never consume this budget.
     return candidates.filter(({ painting, distance, facing, visible }) => (
         Number.isFinite(distance) && distance >= 0
-        && distance <= (currentIds.has(painting.id) ? 27 : 24)
-        && (visible || facing > 0.2 || distance < 8)
+        && distance <= (currentIds.has(painting.id) ? 40 : 36)
+        && (visible || facing > 0.2 || distance < 10)
     )).sort((left, right) => (
         // Prefer the current viewing area, with a small release bias to avoid
         // cancelling/recreating texture jobs at a painting-row boundary.
@@ -64,10 +56,10 @@ export function museumCoverUploadAllowed({
 } = {}) {
     if (inputPending) return false
     if (!interactionBusy) return true
-    const interval = Math.max(100, Math.min(320, lastUploadDuration * 16))
-    return width > 0 && width <= MUSEUM_BASE_COVER_WIDTH
-        && priority >= MUSEUM_VISIBLE_COVER_PRIORITY
-        && sinceLastUpload >= interval
+    const eligible = museumCoverLoadAllowed({ width, priority, interactionBusy, inputPending })
+    const minInterval = width > MUSEUM_BASE_COVER_WIDTH ? 240 : 100
+    const interval = Math.max(minInterval, Math.min(480, lastUploadDuration * 16))
+    return eligible && sinceLastUpload >= interval
 }
 
 export function museumPreloadPaintings(rooms, limit = 76) {

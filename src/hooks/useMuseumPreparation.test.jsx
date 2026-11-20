@@ -25,6 +25,9 @@ it('prepares the restored bay first and stages one nearby room at a time after e
     await act(async () => finish())
     expect(result.current.ready.has('3')).toBe(true)
     await act(async () => vi.advanceTimersByTime(250))
+    expect(prepare).toHaveBeenCalledTimes(1)
+    rerender({ ...props, enabled: true, nearbyIds: ['2'] })
+    await act(async () => vi.advanceTimersByTime(250))
     expect(prepare.mock.calls[1][0].id).toBe('2')
     const signal = prepare.mock.calls[1][1]
     unmount()

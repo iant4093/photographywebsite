@@ -111,7 +111,7 @@ function RoundedBoxShape({ size, radius = 0.08, segments = 3 }) {
     return <primitive object={geometry} attach="geometry" />
 }
 
-function InstancedPlants({ plants, materials, castDynamicShadows = false }) {
+export function InstancedPlants({ plants, materials, castDynamicShadows = false }) {
     const pots = useRef(null)
     const soil = useRef(null)
     const stems = useRef(null)
@@ -391,13 +391,13 @@ function GalleryDisplayFurniture({ layout, materials }) {
     )
 }
 
-function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false }) {
+export function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false }) {
     const benches = useMemo(() => rooms.flatMap((room, roomIndex) => (
         room.benches.map((bench, benchIndex) => ({
             bench,
             // Repeat a restrained three-piece furniture family through long
             // rooms instead of stamping one identical ottoman in every salon.
-            variant: roomIndex + benchIndex,
+            variant: room.benchVariant ?? (roomIndex + benchIndex),
         }))
     )), [rooms])
     const bases = useRef(null)
@@ -455,10 +455,10 @@ function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false }) 
             bases.current?.setColorAt(index, new THREE.Color(palette.base))
             cushions.current?.setColorAt(index, new THREE.Color(palette.cushion))
 
-            for (const x of [-0.56, 0.56]) {
+            for (const x of [-1, 1]) {
                 for (const direction of [-1, 1]) {
                     local.compose(
-                        position.set(x, -0.245, direction * ((depth / 2) - 0.18)),
+                        position.set(x * Math.min(0.56, width / 2 - 0.13), -0.245, direction * ((depth / 2) - 0.18)),
                         localRotation.identity(),
                         scale.set(1, 1, 1),
                     )
