@@ -47,7 +47,7 @@ export const APP_MODULES = Object.freeze([
         id: 'photo-api',
         path: '/apps/photo-api',
         title: 'Photo API',
-        detail: 'Request a random full-resolution photo from the public galleries.',
+        detail: 'Request random photos or paginated lists of full-resolution images from the public galleries.',
         summary: 'Public photo API for developers',
     },
     {

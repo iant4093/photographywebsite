@@ -72,7 +72,11 @@ describe('Apps navigation', () => {
         expect(screen.getByRole('link', { name: /Open the endpoint/ })).toHaveAttribute(
             'href', 'https://photos-api.iantruongphotography.com/v1/photos/random',
         )
+        expect(screen.getByRole('link', { name: /Open the list endpoint/ })).toHaveAttribute(
+            'href', 'https://photos-api.iantruongphotography.com/v1/photos',
+        )
         expect(screen.getByText(/If it has none, pick from all its photos/)).toBeInTheDocument()
+        expect(screen.getByText(/List all public photos/)).toBeInTheDocument()
         expect(document.title).toBe('Photo API | Ian Truong Photography')
     })
 
