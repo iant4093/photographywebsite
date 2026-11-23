@@ -30,16 +30,24 @@ function parseFilter(query, allowCursor) {
     return { slug: query.album ? slug : null, featured: featured === 'true', page: Number(rawCursor) };
 }
 
+function albumPool(slug, featured) {
+    const album = Object.prototype.hasOwnProperty.call(snapshot.albums, slug) && snapshot.albums[slug];
+    if (!album || !album[1]) return error(404, 'no_photos');
+    return {
+        version: album[0],
+        count: featured ? album[2] || album[1] : album[1],
+        pool: featured ? (album[2] ? 'featured' : 'fallback') : 'all',
+    };
+}
+
 function photoPath(query) {
     const filter = parseFilter(query, false);
     if (filter.statusCode) return filter;
 
     if (filter.slug !== null) {
-        const album = Object.prototype.hasOwnProperty.call(snapshot.albums, filter.slug) && snapshot.albums[filter.slug];
-        if (!album || !album[1]) return error(404, 'no_photos');
-        const count = filter.featured ? album[2] || album[1] : album[1];
-        const pool = filter.featured ? (album[2] ? 'featured' : 'fallback') : 'all';
-        return '/catalog/' + album[0] + '/' + pool + '/' + Math.floor(Math.random() * count) + '.json';
+        const target = albumPool(filter.slug, filter.featured);
+        if (target.statusCode) return target;
+        return '/catalog/' + target.version + '/' + target.pool + '/' + Math.floor(Math.random() * target.count) + '.json';
     }
 
     const index = filter.featured ? 2 : 1;
@@ -61,26 +69,18 @@ function listPath(query) {
     const filter = parseFilter(query, true);
     if (filter.statusCode) return filter;
 
-    let version;
-    let pool;
-    let count;
+    let target;
     if (filter.slug !== null) {
-        const album = Object.prototype.hasOwnProperty.call(snapshot.albums, filter.slug) && snapshot.albums[filter.slug];
-        if (!album || !album[1]) return error(404, 'no_photos');
-        version = album[0];
-        count = filter.featured ? album[2] || album[1] : album[1];
-        pool = filter.featured ? (album[2] ? 'featured' : 'fallback') : 'all';
+        target = albumPool(filter.slug, filter.featured);
+        if (target.statusCode) return target;
     } else {
         const poolInfo = snapshot.global;
         const index = filter.featured ? 2 : 1;
         if (!poolInfo || !poolInfo[index]) return error(404, 'no_photos');
-        version = poolInfo[0];
-        count = poolInfo[index];
-        pool = filter.featured ? 'featured' : 'all';
+        target = { version: poolInfo[0], count: poolInfo[index], pool: filter.featured ? 'featured' : 'all' };
     }
-    const pages = Math.ceil(count / PAGE_SIZE);
-    if (filter.page >= pages) return error(400, 'invalid_parameters');
-    return '/catalog/' + version + '/' + pool + '/page-' + filter.page + '.json';
+    if (filter.page >= Math.ceil(target.count / PAGE_SIZE)) return error(400, 'invalid_parameters');
+    return '/catalog/' + target.version + '/' + target.pool + '/page-' + filter.page + '.json';
 }
 
 function imagePath(request) {

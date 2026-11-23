@@ -193,8 +193,18 @@ def list_objects(version, photos, include_fallback=True, page_size=LIST_PAGE_SIZ
             yield f"catalog/{version}/{name}/page-{page}.json", body
 
 
+def compact_selector(source):
+    lines = []
+    for raw_line in source.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith((b"//", b"/*")):
+            continue
+        lines.append(line)
+    return b"\n".join(lines)
+
+
 def selector_code(albums, secret, expires, global_pool=None):
-    source = SELECTOR.read_bytes()
+    source = compact_selector(SELECTOR.read_bytes())
     marker = b"const snapshot = null;"
     if source.count(marker) != 1:
         raise RuntimeError("Edge selector snapshot marker is missing")
