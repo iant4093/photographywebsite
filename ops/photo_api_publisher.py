@@ -26,6 +26,8 @@ MAX_FUNCTION_BYTES = 10 * 1024
 MAX_ALBUMS = 250
 MAX_PHOTOS = 10_000
 MAX_PAGES = 20
+LIST_PAGE_SIZE = 200
+LIST_FORMAT_VERSION = "list-v1"
 HEARTBEAT_SECONDS = 3600
 EXPIRY_SECONDS = 3 * 3600
 ROTATION_SECONDS = 14 * 86400
@@ -169,12 +171,37 @@ def catalog_objects(version, photos):
             yield f"catalog/{version}/{name}/{index}.json", encoded(photo)
 
 
-def selector_code(albums, secret, expires):
+def list_objects(version, photos, include_fallback=True, page_size=LIST_PAGE_SIZE):
+    featured = [photo for photo in photos if photo["featured"]]
+    pools = []
+    if photos:
+        pools.append(("all", photos, False))
+    if featured:
+        pools.append(("featured", featured, False))
+    elif include_fallback and photos:
+        pools.append(("fallback", [{**photo, "fallbackUsed": True} for photo in photos], True))
+    for name, pool, fallback_used in pools:
+        total_pages = (len(pool) + page_size - 1) // page_size
+        for page in range(total_pages):
+            chunk = pool[page * page_size:(page + 1) * page_size]
+            next_cursor = str(page + 1) if page + 1 < total_pages else None
+            body = encoded({
+                "items": chunk,
+                "fallbackUsed": fallback_used,
+                "nextCursor": next_cursor,
+            })
+            yield f"catalog/{version}/{name}/page-{page}.json", body
+
+
+def selector_code(albums, secret, expires, global_pool=None):
     source = SELECTOR.read_bytes()
     marker = b"const snapshot = null;"
     if source.count(marker) != 1:
         raise RuntimeError("Edge selector snapshot marker is missing")
-    snapshot = encoded({"albums": albums, "signingKey": secret.decode(), "expires": expires * 1000})
+    payload = {"albums": albums, "signingKey": secret.decode(), "expires": expires * 1000}
+    if global_pool is not None:
+        payload["global"] = global_pool
+    snapshot = encoded(payload)
     code = source.replace(marker, b"const snapshot = " + snapshot + b";")
     if len(code) > MAX_FUNCTION_BYTES:
         raise RuntimeError("Edge selector exceeds the CloudFront Functions code limit")
@@ -216,6 +243,11 @@ def handler(_event, _context):
     })
     if len(album_ids) > MAX_ALBUMS:
         raise RuntimeError("Public catalog exceeds its album limit")
+    def write_object(item):
+        key, body = item
+        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json",
+                      CacheControl=CACHE_CONTROL)
+
     with ThreadPoolExecutor(max_workers=24) as pool:
         records = [entry for entry in pool.map(lambda aid: load_album(ddb, albums, media, aid), album_ids) if entry]
         if sum(len(images) for _, images in records) > MAX_PHOTOS:
@@ -225,39 +257,45 @@ def handler(_event, _context):
                 raise RuntimeError("Public catalog has duplicate album slugs")
             source = digest([slug, domain, signing_key_id, started // ROTATION_SECONDS, images])
             old = previous.get(slug, {})
-            if old.get("source") == source and old.get("retryAfter", 0) > started:
+            if old.get("source") == source and old.get("retryAfter", 0) > started and isinstance(old.get("photos"), list):
                 index[slug] = old
                 continue
 
             photos = [photo for photo in pool.map(
                 lambda image: build_photo(image_s3, images_bucket, domain, secret, slug, image), images
             ) if photo]
-            version = digest([source, photos])
+            version = digest([source, photos, LIST_FORMAT_VERSION])
             if old.get("pool", [None])[0] != version:
-                def write_object(item):
-                    key, body = item
-                    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json",
-                                  CacheControl=CACHE_CONTROL)
-
-                list(pool.map(write_object, catalog_objects(version, photos)))
+                album_objects = list(catalog_objects(version, photos)) + list(list_objects(version, photos))
+                list(pool.map(write_object, album_objects))
                 photos_written += len(photos)
             index[slug] = {
                 "source": source,
                 "pool": [version, len(photos), sum(photo["featured"] for photo in photos)],
+                "photos": photos,
                 "retryAfter": started + (ROTATION_SECONDS if len(photos) == len(images) else HEARTBEAT_SECONDS),
             }
+        all_photos = [photo for slug in sorted(index) for photo in index[slug]["photos"]]
+        featured_count = sum(1 for photo in all_photos if photo["featured"])
+        global_version = digest([LIST_FORMAT_VERSION, all_photos])
+        global_pool = [global_version, len(all_photos), featured_count]
+        if all_photos and state.get("global", [None])[0] != global_version:
+            list(pool.map(write_object, list_objects(global_version, all_photos, include_fallback=False)))
     published = {slug: entry["pool"] for slug, entry in index.items() if entry["pool"][1]}
     previous_pools = {slug: entry["pool"] for slug, entry in previous.items() if entry["pool"][1]}
-    publish = (published != previous_pools or state.get("publishedAt", 0) + HEARTBEAT_SECONDS <= started
-               or state.get("selectorDigest") != hashlib.sha256(SELECTOR.read_bytes()).hexdigest())
+    selector_digest = hashlib.sha256(SELECTOR.read_bytes()).hexdigest()
+    publish = (published != previous_pools or global_pool != state.get("global")
+               or state.get("publishedAt", 0) + HEARTBEAT_SECONDS <= started
+               or state.get("selectorDigest") != selector_digest)
     if publish:
-        code = selector_code(published, secret, started + EXPIRY_SECONDS)
+        code = selector_code(published, secret, started + EXPIRY_SECONDS, global_pool=global_pool)
         publish_selector(boto3.client("cloudfront", config=CLIENT_CONFIG), os.environ["SELECTOR_NAME"], code)
     if publish or index != previous:
         s3.put_object(Bucket=bucket, Key=STATE_KEY, ContentType="application/json", Body=encoded({
             "albums": index,
+            "global": global_pool,
             "publishedAt": started if publish else state["publishedAt"],
-            "selectorDigest": hashlib.sha256(SELECTOR.read_bytes()).hexdigest(),
+            "selectorDigest": selector_digest,
         }))
     return {
         "albums": len(published),

@@ -1,6 +1,7 @@
 /* global require, Buffer */
 const crypto = require('crypto');
 const snapshot = null; // Replaced by the catalog publisher.
+const PAGE_SIZE = 200;
 
 function error(statusCode, code, retryAfter) {
     const headers = {
@@ -12,27 +13,36 @@ function error(statusCode, code, retryAfter) {
     return { statusCode, headers, body: JSON.stringify({ error: code }) };
 }
 
-function photoPath(query) {
+function parseFilter(query, allowCursor) {
+    const allowed = allowCursor ? ['album', 'featured', 'cursor'] : ['album', 'featured'];
     const names = Object.keys(query);
-    if (names.some(name => !['album', 'featured'].includes(name) || query[name].multiValue)) {
+    if (names.some(name => !allowed.includes(name) || query[name].multiValue)) {
         return error(400, 'invalid_parameters');
     }
     const slug = query.album && query.album.value;
     const featured = query.featured ? query.featured.value : 'false';
+    const rawCursor = allowCursor && query.cursor ? query.cursor.value : '0';
     if ((query.album && (slug.length > 60 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))) ||
-        !['true', 'false'].includes(featured)) {
+        !['true', 'false'].includes(featured) ||
+        !/^(?:0|[1-9][0-9]*)$/.test(rawCursor)) {
         return error(400, 'invalid_parameters');
     }
+    return { slug: query.album ? slug : null, featured: featured === 'true', page: Number(rawCursor) };
+}
 
-    if (query.album) {
-        const album = Object.prototype.hasOwnProperty.call(snapshot.albums, slug) && snapshot.albums[slug];
+function photoPath(query) {
+    const filter = parseFilter(query, false);
+    if (filter.statusCode) return filter;
+
+    if (filter.slug !== null) {
+        const album = Object.prototype.hasOwnProperty.call(snapshot.albums, filter.slug) && snapshot.albums[filter.slug];
         if (!album || !album[1]) return error(404, 'no_photos');
-        const count = featured === 'true' ? album[2] || album[1] : album[1];
-        const pool = featured === 'true' ? (album[2] ? 'featured' : 'fallback') : 'all';
+        const count = filter.featured ? album[2] || album[1] : album[1];
+        const pool = filter.featured ? (album[2] ? 'featured' : 'fallback') : 'all';
         return '/catalog/' + album[0] + '/' + pool + '/' + Math.floor(Math.random() * count) + '.json';
     }
 
-    const index = featured === 'true' ? 2 : 1;
+    const index = filter.featured ? 2 : 1;
     const albums = Object.values(snapshot.albums);
     const count = albums.reduce((total, album) => total + album[index], 0);
     if (!count) return error(404, 'no_photos');
@@ -45,6 +55,32 @@ function photoPath(query) {
         position -= album[index];
     }
     return error(503, 'catalog_unavailable', '60');
+}
+
+function listPath(query) {
+    const filter = parseFilter(query, true);
+    if (filter.statusCode) return filter;
+
+    let version;
+    let pool;
+    let count;
+    if (filter.slug !== null) {
+        const album = Object.prototype.hasOwnProperty.call(snapshot.albums, filter.slug) && snapshot.albums[filter.slug];
+        if (!album || !album[1]) return error(404, 'no_photos');
+        version = album[0];
+        count = filter.featured ? album[2] || album[1] : album[1];
+        pool = filter.featured ? (album[2] ? 'featured' : 'fallback') : 'all';
+    } else {
+        const poolInfo = snapshot.global;
+        const index = filter.featured ? 2 : 1;
+        if (!poolInfo || !poolInfo[index]) return error(404, 'no_photos');
+        version = poolInfo[0];
+        count = poolInfo[index];
+        pool = filter.featured ? 'featured' : 'all';
+    }
+    const pages = Math.ceil(count / PAGE_SIZE);
+    if (filter.page >= pages) return error(400, 'invalid_parameters');
+    return '/catalog/' + version + '/' + pool + '/page-' + filter.page + '.json';
 }
 
 function imagePath(request) {
@@ -72,10 +108,11 @@ function handler(event) {
     const request = event.request;
     if (!['GET', 'HEAD'].includes(request.method)) return error(405, 'method_not_allowed');
     const isPick = request.uri === '/v1/photos/random';
-    if (!isPick && !request.uri.startsWith('/v1/images/')) return error(404, 'not_found');
+    const isList = request.uri === '/v1/photos';
+    if (!isPick && !isList && !request.uri.startsWith('/v1/images/')) return error(404, 'not_found');
     if (!snapshot || Date.now() >= snapshot.expires) return error(503, 'catalog_unavailable', '60');
 
-    const path = isPick ? photoPath(request.querystring) : imagePath(request);
+    const path = isPick ? photoPath(request.querystring) : isList ? listPath(request.querystring) : imagePath(request);
     if (typeof path !== 'string') return path;
     request.uri = path;
     request.querystring = {};
