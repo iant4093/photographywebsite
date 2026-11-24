@@ -254,7 +254,7 @@ class OriginalInfrastructureTests(unittest.TestCase):
         self.assertEqual(worker_event["Properties"]["ScalingConfig"]["MaximumConcurrency"], worker["ReservedConcurrentExecutions"])
         self.assertLessEqual(worker["ReservedConcurrentExecutions"], 2)
         self.assertEqual(coordinator["ReservedConcurrentExecutions"], 1)
-        self.assertEqual(schedule["Properties"]["Schedule"], "rate(15 minutes)")
+        self.assertEqual(schedule["Properties"]["Schedule"], "rate(6 hours)")
         queue = self.resources["OriginalComparisonQueue"]["Properties"]
         dlq = self.resources["OriginalComparisonDeadLetterQueue"]["Properties"]
         self.assertGreaterEqual(queue["VisibilityTimeout"], worker["Timeout"] * 6)

@@ -63,7 +63,6 @@ const NotFound = lazy(() => import('./pages/NotFound'))
 const VideoGallery = lazy(loadVideoGalleryRoute)
 const Videos = lazy(() => import('./pages/Videos'))
 const SectionAlbums = lazy(() => import('./pages/SectionAlbums'))
-const InitialLoadGate = lazy(() => import('./components/InitialLoadGate'))
 
 if (typeof window !== 'undefined') window.history.scrollRestoration = 'manual'
 
@@ -166,7 +165,7 @@ function App() {
                         <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
-                    <InitialLoadGate />
+                    <span hidden data-route-content={location.pathname} />
                 </Suspense>
                 </RecoveryBoundary>
             </main>

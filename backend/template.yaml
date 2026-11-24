@@ -365,7 +365,7 @@ Resources:
         RefreshOriginalIndex:
           Type: Schedule
           Properties:
-            Schedule: rate(15 minutes)
+            Schedule: rate(6 hours)
             Enabled: !If [EnableOriginalComparisons, true, false]
             Input: '{"source":"ian.photography.original-index"}'
             RetryPolicy:
