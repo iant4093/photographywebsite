@@ -473,6 +473,7 @@ describe('Home complete public catalog', () => {
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     const { container } = routed(<Home />)
     const responsive = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
+    expect(responsive).not.toHaveAttribute('data-loaded')
     expect(responsive).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
     expect(responsive).toHaveAttribute('srcset', expect.stringContaining('/site/hero/current/hero-960.jpg 960w'))
     expect(container.querySelector('source[type="image/avif"]')).toHaveAttribute(
@@ -491,6 +492,11 @@ describe('Home complete public catalog', () => {
     expect(container.querySelector('source[type="image/avif"]')).toBeTruthy()
     expect(fallback.sizes).toContain('138svh')
     container.querySelectorAll('picture source').forEach(source => expect(source.sizes).toBe(fallback.sizes))
+    expect(fallback).not.toHaveAttribute('data-loaded')
+    fireEvent.load(fallback)
+    expect(fallback).toHaveAttribute('data-loaded')
+    fireEvent.error(fallback)
+    expect(fallback).not.toHaveAttribute('data-loaded')
   })
 
   it('paints the stable responsive hero without waiting for a manifest request', async () => {

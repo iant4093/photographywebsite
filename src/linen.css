@@ -289,6 +289,14 @@
   border: 1px solid var(--color-charcoal);
 }
 
+.linen-site .home-hero {
+  background-color: #493f35;
+}
+
+.home-hero .home-hero-media:not([data-loaded]) {
+  opacity: 0;
+}
+
 @media (min-width: 768px) {
   .linen-site .linen-hero,
   .linen-site .linen-video-hero {

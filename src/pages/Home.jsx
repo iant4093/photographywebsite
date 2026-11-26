@@ -196,7 +196,11 @@ function Home() {
                             alt="Ian Truong Photography portfolio cover"
                             fetchPriority="high"
                             decoding="async"
-                            onError={() => {
+                            onLoad={({ currentTarget }) => {
+                                currentTarget.dataset.loaded = ''
+                            }}
+                            onError={({ currentTarget }) => {
+                                delete currentTarget.dataset.loaded
                                 if (usePublishedVersion) setFailedHeroVersion(publishedHero.version)
                                 else if (useResponsiveHero) setResponsiveHeroFailed(true)
                                 else if (!useBundledHero) setManagedHomeFailed(true)
