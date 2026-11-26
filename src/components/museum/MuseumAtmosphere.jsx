@@ -7,25 +7,28 @@ import { museumRoomCofferPanels } from '../../utils/museumSkylights'
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1)
 
-function ArchitectureBatch({ items, color, luminous = false }) {
+export function ArchitectureBatch({ items, color = '#ffffff', luminous = false, roughness = 0.78, castShadow = false, receiveShadow = false }) {
     const mesh = useRef(null)
     useLayoutEffect(() => {
         const matrix = new THREE.Matrix4()
         const position = new THREE.Vector3()
         const scale = new THREE.Vector3()
         const rotation = new THREE.Quaternion()
+        const tint = new THREE.Color()
         items.forEach((item, index) => {
             matrix.compose(position.set(...item.position), rotation, scale.set(...item.size))
             mesh.current.setMatrixAt(index, matrix)
+            if (item.color) mesh.current.setColorAt(index, tint.set(item.color))
         })
         mesh.current.instanceMatrix.needsUpdate = true
+        if (mesh.current.instanceColor) mesh.current.instanceColor.needsUpdate = true
         mesh.current.computeBoundingSphere()
     }, [items])
     return (
-        <instancedMesh ref={mesh} args={[UNIT_BOX, undefined, items.length]}>
+        <instancedMesh ref={mesh} args={[UNIT_BOX, undefined, items.length]} castShadow={castShadow} receiveShadow={receiveShadow}>
             {luminous
                 ? <meshBasicMaterial color={color} toneMapped={false} />
-                : <meshStandardMaterial color={color} roughness={0.78} />}
+                : <meshStandardMaterial color={color} roughness={roughness} />}
         </instancedMesh>
     )
 }

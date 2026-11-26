@@ -105,15 +105,35 @@ export function sampleBakedVaultIrradiance({ x = 0, z = 0, halfWidth = 4.8, fixt
     return [base + pool * 0.14, base + pool * 0.048, base + (1 - pool) * 0.09 - pool * 0.065]
 }
 
-export function sampleBakedFloorIrradiance({
+function floorShadowBounds(occluder) {
+    const radius = Math.max(0.18, Number(occluder?.radius) || 0.7)
+    const radiusX = Math.max(0.18, Number(occluder?.radiusX) || radius)
+    const radiusZ = Math.max(0.18, Number(occluder?.radiusZ) || radius)
+    const rotation = Number(occluder?.rotationY) || 0
+    const cosine = Math.cos(rotation)
+    const sine = Math.sin(rotation)
+    return {
+        across: Number(occluder?.across) || 0, along: Number(occluder?.along) || 0,
+        radiusX, radiusZ, cosine, sine,
+        extentX: Math.abs(cosine) * radiusX + Math.abs(sine) * radiusZ,
+        extentZ: Math.abs(sine) * radiusX + Math.abs(cosine) * radiusZ,
+        feather: Math.min(0.35, Math.max(0.2, Number(occluder?.feather) || 0.28)),
+        strength: Math.min(0.18, Math.max(0, Number(occluder?.strength) || 0.1)),
+    }
+}
+
+export function sampleBakedFloorIrradiance({ occluders = [], ...sample } = {}) {
+    return sampleFloorLighting(sample, occluders.map(floorShadowBounds))
+}
+
+function sampleFloorLighting({
     across = 0,
     along = 0,
     width = 1,
     depth = 1,
     mode = 'room',
     fixtures = [],
-    occluders = [],
-} = {}) {
+}, shadows) {
     const halfWidth = Math.max(0.001, Math.abs(width) / 2)
     const halfDepth = Math.max(0.001, Math.abs(depth) / 2)
     const acrossRatio = Math.min(1, Math.abs(across) / halfWidth)
@@ -132,16 +152,11 @@ export function sampleBakedFloorIrradiance({
         * (mode === 'hall' ? 0.6 + 0.4 * Math.exp(-0.5 * (across / 2.6) ** 2) : 1)
     const centerRatio = mode === 'hall' ? acrossRatio : Math.min(1, Math.abs(across) / halfWidth)
     const centralLift = Math.max(0, 1 - ((Math.max(0, centerRatio - 0.12)) / 0.8))
-    const contactOcclusion = Math.min(0.19, occluders.reduce((total, occluder) => {
-        const fallbackRadius = Math.max(0.18, Number(occluder?.radius) || 0.7)
-        const radiusX = Math.max(0.18, Number(occluder?.radiusX) || fallbackRadius)
-        const radiusZ = Math.max(0.18, Number(occluder?.radiusZ) || fallbackRadius)
-        const rotation = Number(occluder?.rotationY) || 0
-        const strength = Math.min(0.18, Math.max(0, Number(occluder?.strength) || 0.1))
-        const dx = across - (Number(occluder?.across) || 0)
-        const dz = along - (Number(occluder?.along) || 0)
-        const cosine = Math.cos(rotation)
-        const sine = Math.sin(rotation)
+    const contactOcclusion = Math.min(0.19, shadows.reduce((total, shadow) => {
+        const { radiusX, radiusZ, cosine, sine, strength, feather } = shadow
+        const dx = across - shadow.across
+        const dz = along - shadow.along
+        if (Math.abs(dx) > shadow.extentX + feather) return total
         const localX = (dx * cosine) + (dz * sine)
         const localZ = (-dx * sine) + (dz * cosine)
         const normalizedX = Math.abs(localX) / radiusX
@@ -150,7 +165,6 @@ export function sampleBakedFloorIrradiance({
         const outsideZ = Math.max(0, Math.abs(localZ) - radiusZ)
         const outsideDistance = Math.hypot(outsideX, outsideZ)
         const insideDistance = Math.min(1, Math.max(normalizedX, normalizedZ))
-        const feather = Math.min(0.35, Math.max(0.2, Number(occluder?.feather) || 0.28))
         // An oriented rounded-rectangle footprint keeps the full underside of
         // a long bench or desk grounded, then feathers a fixed number of world
         // metres beyond its silhouette. Using normalized distance here made a
@@ -192,6 +206,7 @@ export function buildBakedFloorGrid({
     const safeDepth = Math.max(0.001, Math.abs(Number(depth) || 1))
     const halfWidth = safeWidth / 2
     const halfDepth = safeDepth / 2
+    const shadows = occluders.map(floorShadowBounds)
     const axisSamples = (span, maximumStep, axis) => {
         const halfSpan = span / 2
         const segments = Math.max(2, Math.ceil(span / maximumStep))
@@ -199,15 +214,10 @@ export function buildBakedFloorGrid({
             -halfSpan + ((span * index) / segments)
         ))
         const critical = [-halfSpan, halfSpan]
-        occluders.forEach((occluder) => {
-            const center = Number(occluder?.[axis === 'x' ? 'across' : 'along']) || 0
-            const radiusX = Math.max(0.18, Number(occluder?.radiusX) || Number(occluder?.radius) || 0.7)
-            const radiusZ = Math.max(0.18, Number(occluder?.radiusZ) || Number(occluder?.radius) || 0.7)
-            const rotation = Number(occluder?.rotationY) || 0
-            const projectedRadius = axis === 'x'
-                ? (Math.abs(Math.cos(rotation)) * radiusX) + (Math.abs(Math.sin(rotation)) * radiusZ)
-                : (Math.abs(Math.sin(rotation)) * radiusX) + (Math.abs(Math.cos(rotation)) * radiusZ)
-            const feather = Math.min(0.35, Math.max(0.2, Number(occluder?.feather) || 0.28))
+        shadows.forEach(shadow => {
+            const center = axis === 'x' ? shadow.across : shadow.along
+            const projectedRadius = axis === 'x' ? shadow.extentX : shadow.extentZ
+            const { feather } = shadow
             ;[
                 center - projectedRadius - feather,
                 center - projectedRadius,
@@ -280,19 +290,19 @@ export function buildBakedFloorGrid({
     const colors = []
     const indices = []
     zs.forEach((along) => {
+        const rowShadows = shadows.filter(shadow => Math.abs(along - shadow.along) <= shadow.extentZ + shadow.feather)
         xs.forEach((across) => {
             positions.push(across, 0.11, along)
             normals.push(0, 1, 0)
             uvs.push((across + halfWidth) / safeWidth, (along + halfDepth) / safeDepth)
-            colors.push(...sampleBakedFloorIrradiance({
+            colors.push(...sampleFloorLighting({
                 across,
                 along,
                 width: safeWidth,
                 depth: safeDepth,
                 mode,
                 fixtures,
-                occluders,
-            }))
+            }, rowShadows))
         })
     })
     const rowLength = xs.length

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { RETURN_PRINT_ASPECT, ALBUM_ARCH_DEPTH, ALBUM_DOOR_HALF_WIDTH, ALBUM_HANG_HEIGHT, albumBayAt, albumPrintWidth } from '../../utils/museumAlbumWing'
@@ -8,6 +8,7 @@ import { albumFrameGeometry, albumPhotoPlaque } from '../../utils/museumAlbumFra
 import { applyPaintingRipple } from '../../utils/museumPaintingRipple'
 import { InstancedPlants, InstancedRoomBenches } from './MuseumDressing'
 import MuseumChandeliers from './MuseumChandeliers'
+import { ArchitectureBatch } from './MuseumAtmosphere'
 
 const hallView = '/assets/museum/gallery-return.webp'
 
@@ -18,11 +19,18 @@ function Block({ position, size, color, lit = false }) {
     </mesh>
 }
 
-function usePrintTexture(image, maxEdge, detail, loadImage, requestFrames, priority = false) {
+function usePrintTexture(image, maxEdge, detail, loadImage, uploadTexture, requestFrames, priority = false) {
+    const { gl } = useThree()
     const [print, setPrint] = useState(null)
     useEffect(() => {
         const controller = new AbortController()
         let texture
+        let bitmap
+        const release = () => {
+            texture?.dispose()
+            bitmap?.close()
+            texture = bitmap = null
+        }
         const load = async () => {
             const previews = mediaPreviewCandidates(image)
             const preview = previews.find(item => item.width === maxEdge)?.url
@@ -32,37 +40,52 @@ function usePrintTexture(image, maxEdge, detail, loadImage, requestFrames, prior
                 if (!url) continue
                 try {
                     const decoded = await loadImage(url, detail || priority, 0, controller.signal)
-                    if (controller.signal.aborted) return
+                    bitmap = typeof ImageBitmap !== 'undefined' && decoded instanceof ImageBitmap ? decoded : null
+                    if (controller.signal.aborted) {
+                        release()
+                        return
+                    }
+                    const aspect = decoded.width / decoded.height
                     const ratio = Math.min(1, maxEdge / Math.max(decoded.width, decoded.height))
                     let source = decoded
                     if (ratio < 1 && (url !== preview || ratio < 0.62)) {
                         source = document.createElement('canvas')
                         source.width = Math.max(1, Math.round(decoded.width * ratio))
                         source.height = Math.max(1, Math.round(decoded.height * ratio))
-                        source.getContext('2d').drawImage(decoded, 0, 0, source.width, source.height)
+                        const context = source.getContext('2d')
+                        // Bitmap sources are already flipped for WebGL. A canvas
+                        // texture gets flipped during upload, so restore it here.
+                        if (bitmap) context.setTransform(1, 0, 0, -1, 0, source.height)
+                        context.drawImage(decoded, 0, 0, source.width, source.height)
+                        bitmap?.close()
+                        bitmap = null
                     }
                     texture = new THREE.Texture(source)
                     texture.colorSpace = THREE.SRGBColorSpace
                     texture.anisotropy = 4
                     texture.needsUpdate = true
-                    setPrint({ texture, aspect: decoded.width / decoded.height })
+                    await uploadTexture(gl, texture, maxEdge, detail || priority, controller.signal)
+                    if (controller.signal.aborted) return
+                    setPrint({ texture, aspect })
                     requestFrames(2)
                     return
                 } catch {
                     if (controller.signal.aborted) return
+                    release()
                 }
             }
             setPrint({ failed: true })
             requestFrames(2)
         }
         load()
-        return () => { controller.abort(); texture?.dispose() }
-    }, [image, loadImage, maxEdge, requestFrames, detail, priority])
+        return () => { controller.abort(); release() }
+    }, [image, loadImage, uploadTexture, gl, maxEdge, requestFrames, detail, priority])
     return print
 }
 
-function PrintPlaceholder({ image, width, height, drawPlaceholder }) {
+function usePrintPlaceholder(image, drawPlaceholder, ready) {
     const texture = useMemo(() => {
+        if (ready) return null
         const canvas = document.createElement('canvas')
         canvas.width = 32
         canvas.height = 24
@@ -71,9 +94,9 @@ function PrintPlaceholder({ image, width, height, drawPlaceholder }) {
         const map = new THREE.CanvasTexture(canvas)
         map.colorSpace = THREE.SRGBColorSpace
         return map
-    }, [image, drawPlaceholder])
-    useEffect(() => () => texture.dispose(), [texture])
-    return <PrintSurface texture={texture} width={width} height={height} />
+    }, [image, drawPlaceholder, ready])
+    useEffect(() => () => texture?.dispose(), [texture])
+    return texture
 }
 
 function PrintSurface({ texture, width, height, portal }) {
@@ -87,21 +110,15 @@ function PrintSurface({ texture, width, height, portal }) {
     </mesh>
 }
 
-function InspectedPrint({ image, inspectionWidth, loadImage, requestFrames, base, width, height }) {
-    const detail = usePrintTexture(image, inspectionWidth, true, loadImage, requestFrames)
+function InspectedPrint({ image, inspectionWidth, loadImage, uploadTexture, requestFrames, base, width, height }) {
+    const detail = usePrintTexture(image, inspectionWidth, true, loadImage, uploadTexture, requestFrames)
     return <PrintSurface texture={detail?.texture || base.texture} width={width} height={height} />
 }
 
-function FramedPrint({ position, rotationY, image, loadImage, requestFrames, Label, inspectionWidth, portal,
-    arrival, index, id, drawPlaceholder, arrivalPrint = false }) {
-    const { gl } = useThree()
-    const base = usePrintTexture(image, 960, false, loadImage, requestFrames, arrivalPrint)
-    useLayoutEffect(() => {
-        const key = portal ? id : index
-        if (!base || !arrival.pending.has(key)) return
-        if (base.texture) gl.initTexture(base.texture)
-        arrival.pending.delete(key)
-    }, [base, gl, arrival, index, id, portal])
+function FramedPrint({ position, rotationY, image, loadImage, uploadTexture, requestFrames, Label, inspectionWidth, portal,
+    drawPlaceholder, arrivalPrint = false }) {
+    const base = usePrintTexture(image, 960, false, loadImage, uploadTexture, requestFrames, arrivalPrint)
+    const placeholder = usePrintPlaceholder(image, drawPlaceholder, Boolean(base?.texture))
     const aspect = portal ? RETURN_PRINT_ASPECT : (image?.width / image?.height) || base?.aspect || 1.5
     const width = albumPrintWidth(aspect)
     const height = width / aspect
@@ -110,11 +127,10 @@ function FramedPrint({ position, rotationY, image, loadImage, requestFrames, Lab
     const plaque = portal ? 'Return to gallery' : albumPhotoPlaque(image)
     return <group position={position} rotation={[0, rotationY, 0]}>
         <mesh geometry={geometry}><meshStandardMaterial vertexColors roughness={0.67} /></mesh>
-        {base?.texture ? (inspectionWidth
+        {inspectionWidth && base?.texture
             ? <InspectedPrint image={image} inspectionWidth={inspectionWidth} base={base}
-                loadImage={loadImage} requestFrames={requestFrames} width={width} height={height} />
-            : <PrintSurface texture={base.texture} width={width} height={height} portal={portal} />)
-            : <PrintPlaceholder image={image} width={width} height={height} drawPlaceholder={drawPlaceholder} />}
+                loadImage={loadImage} uploadTexture={uploadTexture} requestFrames={requestFrames} width={width} height={height} />
+            : <PrintSurface texture={base?.texture || placeholder} width={width} height={height} portal={portal} />}
         {plaque && <Label title={plaque}
             position={[0, -height / 2 - 0.45, 0.042]} size={portal ? [1.75, 0.36] : [1.64, 0.29]} photoPlaque={!portal} />}
     </group>
@@ -198,7 +214,7 @@ function EndWall({ width, height, z, rotationY, materials, Wallpaper, trim }) {
     </group>
 }
 
-function Salon({ wing, bay, index, hang, focus, inspectionWidth, materials, Wallpaper, Floor, ...printProps }) {
+const Salon = memo(function Salon({ wing, bay, index, hang, focus, inspectionWidth, materials, Wallpaper, Floor, ...printProps }) {
     const { width: w, length: d } = bay
     const z = (bay.front + bay.back) / 2
     const h = wing.height
@@ -209,27 +225,30 @@ function Salon({ wing, bay, index, hang, focus, inspectionWidth, materials, Wall
     const railBack = bay.back + (last ? 0 : 0.12)
     const railLength = railFront - railBack
     const railZ = (railFront + railBack) / 2
+    const trimAndCeiling = useMemo(() => [
+        { position: [0, h + 0.1, z], size: [w, 0.2, d], color: '#6d6458' },
+        ...[-1, 1].flatMap(side => [
+            { position: [side * w / 2, 0.14, railZ], size: [0.15, 0.28, railLength], color: '#453b32' },
+            { position: [side * w / 2, 0.30, railZ], size: [0.18, 0.04, railLength], color: '#776751' },
+            { position: [side * w / 2, h - 0.08, railZ], size: [0.18, 0.16, railLength], color: wing.palette[1] },
+        ]),
+    ], [h, z, w, d, railZ, railLength, wing.palette])
     return <group>
         <mesh position={[0, 0, z]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[w, d]} />
             <Floor materials={materials} color="#96816e" width={w} depth={d} centerX={0} centerZ={z} />
         </mesh>
-        <Block position={[0, h + 0.1, z]} size={[w, 0.2, d]} color="#6d6458" />
-        {[-1, 1].map(side => <group key={side}>
-            <SalonWall bay={bay} side={side} wing={wing} materials={materials} Wallpaper={Wallpaper} />
-            <Block position={[side * w / 2, 0.14, railZ]} size={[0.15, 0.28, railLength]} color="#453b32" />
-            <Block position={[side * w / 2, 0.30, railZ]} size={[0.18, 0.04, railLength]} color="#776751" />
-            <Block position={[side * w / 2, h - 0.08, railZ]} size={[0.18, 0.16, railLength]} color={wing.palette[1]} />
-        </group>)}
+        <ArchitectureBatch items={trimAndCeiling} roughness={0.8} />
+        {[-1, 1].map(side => <SalonWall key={side} bay={bay} side={side} wing={wing} materials={materials} Wallpaper={Wallpaper} />)}
         {previous ? <ArchWall width={Math.max(w, previous.width)} height={h} z={bay.front} materials={materials} Wallpaper={Wallpaper} />
             : <EndWall width={w} height={h} z={bay.front} rotationY={Math.PI} Wallpaper={Wallpaper} materials={materials} trim={wing.palette[1]} />}
         {last && <EndWall width={w} height={h} z={bay.back} rotationY={0} Wallpaper={Wallpaper} materials={materials} trim={wing.palette[1]} />}
         {hang && bay.prints.map(print => <FramedPrint key={print.index} {...print} {...printProps} arrivalPrint={index === 1}
             inspectionWidth={focus === print.index ? inspectionWidth : 0} />)}
     </group>
-}
+})
 
-export default function MuseumAlbumWing({ wing, visible, inspectionWidth, ...props }) {
+export default function MuseumAlbumWing({ wing, visible, preparingArrival, inspectionWidth, ...props }) {
     const { camera } = useThree()
     const [activeBay, setActiveBay] = useState(0)
     const [focus, setFocus] = useState(null)
@@ -237,7 +256,13 @@ export default function MuseumAlbumWing({ wing, visible, inspectionWidth, ...pro
     const direction = useMemo(() => new THREE.Vector3(), [])
     const offset = useMemo(() => new THREE.Vector3(), [])
     useFrame(({ clock }) => {
-        if (!visible) return
+        if (!visible) {
+            // A previous visit may have ended at the far portal. Hang the
+            // arrival bay again while the next departure morph is still running.
+            if (preparingArrival && activeBay !== 0) setActiveBay(0)
+            if (preparingArrival && focus !== null) setFocus(null)
+            return
+        }
         const index = albumBayAt(wing.bays, camera.position.z)
         if (index !== activeBay) setActiveBay(index)
         const now = clock.elapsedTime
@@ -266,19 +291,19 @@ export default function MuseumAlbumWing({ wing, visible, inspectionWidth, ...pro
             if (focus !== candidate) setFocus(candidate)
         } else if (!retain && focus !== null) setFocus(null)
     })
-    const bay = wing.bays[activeBay]
+    const bay = wing.bays[Math.min(activeBay, wing.bays.length - 1)]
     const first = albumBayAt(wing.bays, bay.front + camera.far)
     const last = albumBayAt(wing.bays, bay.back - camera.far)
     const rooms = useMemo(() => wing.bays.slice(first, last + 1), [wing, first, last])
     const plants = useMemo(() => rooms.flatMap(room => room.plants), [rooms])
     const fixtures = useMemo(() => rooms.map(room => [0, (room.front + room.back) / 2]), [rooms])
-    return <group visible={visible}>
+    return <group>
         <hemisphereLight args={['#c6b198', '#564438', 0.44]} />
         <MuseumChandeliers positions={fixtures} ceilingY={wing.height} materials={props.materials} />
         <InstancedRoomBenches rooms={rooms} materials={props.materials} />
         <InstancedPlants plants={plants} materials={props.materials} />
         {rooms.map((bay, i) => <Salon key={first + i} index={first + i}
-            bay={bay} wing={wing} focus={focus} inspectionWidth={inspectionWidth}
+            bay={bay} wing={wing} focus={first + i === activeBay ? focus : null} inspectionWidth={inspectionWidth}
             hang={Math.abs(first + i - activeBay) <= 2} {...props} />)}
         {wing.portals.map((portal, i) => (i === 0 ? first === 0 : last === wing.bays.length - 1)
             && <FramedPrint key={portal.id} {...portal} image={hallView} portal={portal} arrivalPrint={i === 0} {...props} />)}

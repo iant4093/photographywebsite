@@ -16,7 +16,6 @@ export function applyPaintingRipple(shader, painting, aspect = 2.66 / 1.76) {
         '#include <map_fragment>',
         `#ifdef USE_MAP
         vec2 museumPrintUV = vMapUv;
-        float crest = 0.0;
         if (museumRipple >= 0.0) {
             vec2 aspect = vec2(museumRippleAspect, 1.0);
             vec2 p = (vMapUv - 0.5) * aspect;
@@ -25,10 +24,8 @@ export function applyPaintingRipple(shader, painting, aspect = 2.66 / 1.76) {
             float envelope = exp(-8.5 * abs(wave)) * smoothstep(0.0, 0.08, museumRipple);
             float bend = sin(wave * 58.0) * envelope;
             museumPrintUV = clamp(vMapUv + (p / max(d, 0.001)) / aspect * bend * 0.044, 0.0, 1.0);
-            crest = bend * 0.39;
         }
         ${ShaderChunk.map_fragment.replaceAll('vMapUv', 'museumPrintUV')}
-        diffuseColor.rgb = diffuseColor.rgb * (1.0 + crest) + vec3(0.22, 0.15, 0.08) * max(0.0, crest);
         #endif`
     ).replace('texture2D(museumPreviousMap, vMapUv)', 'texture2D(museumPreviousMap, museumPrintUV)')
 }

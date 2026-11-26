@@ -31,14 +31,15 @@ describe('album wing generation', () => {
                 const prints = bay.prints.filter(print => Math.sign(print.position[0]) === side)
                 if (!prints.length) continue
                 expect(prints[0].position[0]).toBeCloseTo(side * (bay.width / 2 - 0.055))
-                const firstEdge = prints[0].position[2] + prints[0].frameWidth / 2
-                const lastEdge = prints.at(-1).position[2] - prints.at(-1).frameWidth / 2
-                const midpoint = (firstEdge + lastEdge) / 2
-                for (let i = 1; i < prints.length; i++) {
-                    const separation = prints[i - 1].position[2] - prints[i].position[2]
-                    expect(separation - (prints[i - 1].frameWidth + prints[i].frameWidth) / 2).toBeCloseTo(1.25)
+                const rows = Math.ceil(bay.prints.length / 2)
+                const middle = (bay.front + bay.back) / 2
+                for (let i = 0; i < prints.length; i++) {
+                    expect(prints[i].position[2]).toBeCloseTo(middle + ((rows - 1) / 2 - i) * 4.15)
+                    if (!i) continue
+                    const edgeGap = prints[i - 1].position[2] - prints[i].position[2]
+                        - (prints[i - 1].frameWidth + prints[i].frameWidth) / 2
+                    expect(edgeGap).toBeGreaterThan(1.25)
                 }
-                expect(midpoint).toBeCloseTo((bay.front + bay.back) / 2)
                 expect(prints.at(-1).position[2]).toBeGreaterThan(exit.front + 2)
             }
         }
@@ -68,8 +69,7 @@ describe('album wing generation', () => {
             const seats = bay.benches.filter(b => Math.sign(b.position[0]) === side)
             expect(seats).toHaveLength(2)
             seats.forEach((bench, i) => {
-                const gap = (wall[i].position[2] - wall[i].frameWidth / 2
-                    + wall[i + 1].position[2] + wall[i + 1].frameWidth / 2) / 2
+                const gap = (wall[i].position[2] + wall[i + 1].position[2]) / 2
                 expect(bench.position[2]).toBeCloseTo(gap)
             })
         }
@@ -77,6 +77,35 @@ describe('album wing generation', () => {
             const [x, , z] = prop.position
             const start = { x: x - Math.sign(x) * (prop.size[0] / 2 + 0.4), z }
             expect(moveInAlbumWing(wing, start, { x: Math.sign(x) * 0.12, z: 0 })).toEqual(start)
+        }
+    })
+
+    it.each([0.1, 2 / 3, 1.5])('leaves exposed floor between paired bench rugs at aspect %f', aspect => {
+        const images = Array.from({ length: 11 }, () => ({ width: 1200 * aspect, height: 1200 }))
+        const { bays } = buildMuseumAlbumWing(album, images)
+        for (const bay of bays.slice(1, -1)) {
+            for (const side of [-1, 1]) {
+                const [a, b] = bay.benches.filter(bench => Math.sign(bench.position[0]) === side)
+                if (!b) continue
+                const clearance = Math.abs(a.position[2] - b.position[2]) - (a.rugLength + b.rugLength) / 2
+                expect(clearance).toBeGreaterThanOrEqual(0.75 - 1e-8)
+                expect(a.rugLength).toBeGreaterThan(a.size[2])
+            }
+        }
+    })
+
+    it('aligns both bench rows across the aisle in a mixed 23-photo album', () => {
+        const images = Array.from({ length: 23 }, (_, i) => ({ width: i % 5 < 2 ? 600 : 1600, height: 1000 }))
+        for (const bay of buildMuseumAlbumWing(album, images).bays.slice(1, -1)) {
+            const left = bay.benches.filter(b => b.position[0] < 0)
+            const right = bay.benches.filter(b => b.position[0] > 0)
+            for (let i = 0; i < Math.min(left.length, right.length); i++) {
+                expect(left[i].position[2]).toBe(right[i].position[2])
+                expect(right[i].position[0]).toBe(-left[i].position[0])
+            }
+            for (const row of [left, right]) {
+                if (row.length === 2) expect(row[0].position[2] - row[1].position[2] - row[0].rugLength).toBeCloseTo(1.9)
+            }
         }
     })
 

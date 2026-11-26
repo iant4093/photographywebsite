@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Three.js scene environment state is managed by the renderer lifecycle. */
 import { useThree } from '@react-three/fiber'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -11,17 +11,12 @@ import { applyMuseumDisplayResponse } from '../../utils/museumMaterialResponse'
 import { MUSEUM_MATERIAL_TILE_METERS } from '../../utils/museumMaterialAssets'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { museumHallSconcePlacements } from '../../utils/museumSupport'
+import { BENCH_PALETTES } from '../../utils/museumRugs'
 import { MUSEUM_DIMENSIONS } from '../../utils/museumLayout'
 import { MUSEUM_PLANT_FORM, MUSEUM_PLANT_LEAF_MESH, museumPlantLeaves } from '../../utils/museumPlants'
 
 const DARK_BRASS = '#735332'
-const BENCH_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 3, 0.1)
-const BENCH_PALETTES = [
-    { base: '#342126', cushion: '#75464f', rugOuter: '#3e282c', rugInner: '#5b3940', rugBorder: '#8a744f', rugCenter: '#48292f' },
-    { base: '#252c31', cushion: '#4f6570', rugOuter: '#273137', rugInner: '#3f535d', rugBorder: '#9a8257', rugCenter: '#30444e' },
-    { base: '#352d22', cushion: '#70604b', rugOuter: '#393128', rugInner: '#5b4e3d', rugBorder: '#a28958', rugCenter: '#493d30' },
-]
-
+const BENCH_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.1)
 function useTextileMaps(materials, width, depth) {
     const maps = useMemo(() => Object.fromEntries(
         Object.entries(materials.fabric).map(([name, source]) => {
@@ -271,55 +266,10 @@ function RunnerCarpet({ layout, materials }) {
     )
 }
 
-function SalonRugs({ benches }) {
-    const rug = useMemo(() => {
-        const canvas = document.createElement('canvas')
-        const tile = 256
-        canvas.width = tile
-        canvas.height = tile * BENCH_PALETTES.length
-        const context = canvas.getContext('2d')
-        BENCH_PALETTES.forEach((palette, index) => {
-            context.save()
-            context.translate(0, index * tile)
-            context.fillStyle = palette.rugOuter
-            context.fillRect(0, 0, tile, tile)
-            context.fillStyle = palette.rugInner
-            context.fillRect(10, 10, 236, 236)
-            context.strokeStyle = palette.rugBorder
-            context.lineWidth = 3
-            context.strokeRect(16, 16, 224, 224)
-            context.lineWidth = 1
-            context.strokeRect(25, 25, 206, 206)
-            context.fillStyle = palette.rugCenter
-            context.fillRect(30, 30, 196, 196)
-            // Woven geometry gives each reading area a quieter, finer pattern
-            // than four stacked slabs. One small atlas serves every salon.
-            for (let y = 48; y < 224; y += 32) {
-                for (let x = 48; x < 224; x += 32) {
-                    context.beginPath()
-                    context.moveTo(x, y - 5)
-                    context.lineTo(x + 4, y)
-                    context.lineTo(x, y + 5)
-                    context.lineTo(x - 4, y)
-                    context.closePath()
-                    context.stroke()
-                }
-            }
-            context.globalAlpha = 0.1
-            context.strokeStyle = '#eadbc1'
-            for (let line = 2; line < tile; line += 3) {
-                context.beginPath()
-                context.moveTo(1, line)
-                context.lineTo(tile - 1, line)
-                context.stroke()
-            }
-            context.restore()
-        })
-        const texture = new THREE.CanvasTexture(canvas)
-        texture.colorSpace = THREE.SRGBColorSpace
-        texture.anisotropy = 4
+function SalonRugs({ benches, texture }) {
+    const geometry = useMemo(() => {
         const parts = benches.map(({ bench, variant }) => {
-            const geometry = new THREE.PlaneGeometry(bench.size[0] + 1.15, bench.size[2] + 0.95)
+            const geometry = new THREE.PlaneGeometry(bench.size[0] + 1.15, bench.rugLength ?? bench.size[2] + 0.95)
             const uv = geometry.getAttribute('uv')
             const row = variant % BENCH_PALETTES.length
             for (let index = 0; index < uv.count; index += 1) {
@@ -334,15 +284,12 @@ function SalonRugs({ benches }) {
         })
         const geometry = mergeGeometries(parts)
         parts.forEach(part => part.dispose())
-        return { geometry, texture }
+        return geometry
     }, [benches])
-    useEffect(() => () => {
-        rug.geometry.dispose()
-        rug.texture.dispose()
-    }, [rug])
+    useEffect(() => () => geometry.dispose(), [geometry])
     return (
-        <mesh geometry={rug.geometry} receiveShadow>
-            <meshStandardMaterial map={rug.texture} roughness={0.97} />
+        <mesh geometry={geometry} receiveShadow>
+            <meshStandardMaterial map={texture} roughness={0.97} />
         </mesh>
     )
 }
@@ -391,15 +338,15 @@ function GalleryDisplayFurniture({ layout, materials }) {
     )
 }
 
-export function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false }) {
+export function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false, paletteOffset = 0 }) {
     const benches = useMemo(() => rooms.flatMap((room, roomIndex) => (
         room.benches.map((bench, benchIndex) => ({
             bench,
             // Repeat a restrained three-piece furniture family through long
             // rooms instead of stamping one identical ottoman in every salon.
-            variant: room.benchVariant ?? (roomIndex + benchIndex),
+            variant: room.benchVariant ?? (paletteOffset + roomIndex + benchIndex),
         }))
-    )), [rooms])
+    )), [rooms, paletteOffset])
     const bases = useRef(null)
     const cushions = useRef(null)
     const trimBands = useRef(null)
@@ -496,7 +443,7 @@ export function InstancedRoomBenches({ rooms, materials, castDynamicShadows = fa
                 <cylinderGeometry args={[0.055, 0.075, 0.28, 10]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.72} roughness={0.28} />
             </instancedMesh>
-            <SalonRugs benches={benches} />
+            <SalonRugs benches={benches} texture={materials.rugs.map} />
         </>
     )
 }
@@ -659,18 +606,19 @@ function InstancedWallSconces({ placements }) {
     )
 }
 
-export default function MuseumDressing({ layout, materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true, shadowsEnabled = false }) {
-    // The production catalog currently has a small furniture set. Keeping one
-    // stable all-room instance allocation is cheaper than reconstructing plant
-    // and bench meshes every time the visitor crosses a preparation radius.
-    const dressedRooms = layout.rooms
+export const MuseumRoomFurnishings = memo(function MuseumRoomFurnishings({ room, roomIndex, materials, shadowsEnabled }) {
+    const rooms = useMemo(() => [room], [room])
+    return <>
+        <InstancedPlants plants={room.plants} materials={materials} castDynamicShadows={shadowsEnabled} />
+        <InstancedRoomBenches rooms={rooms} paletteOffset={roomIndex} materials={materials} castDynamicShadows={shadowsEnabled} />
+    </>
+})
+
+export default memo(function MuseumDressing({ layout, materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true }) {
     const staticPlants = useMemo(() => [
         ...layout.dressing.lobbyPlants,
         ...layout.dressing.hallPlants,
     ], [layout.dressing.hallPlants, layout.dressing.lobbyPlants])
-    const roomPlants = useMemo(() => [
-        ...dressedRooms.flatMap(room => room.plants),
-    ], [dressedRooms])
     const sconcePlacements = useMemo(
         () => museumHallSconcePlacements(layout),
         [layout],
@@ -682,8 +630,6 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
             <LobbyEntrance materials={materials} LabelPlane={LabelPlane} PlasterMaterial={PlasterMaterial} />
             <ReceptionDesk layout={layout} materials={materials} LabelPlane={LabelPlane} WoodMaterial={WoodMaterial} />
             <InstancedPlants plants={staticPlants} materials={materials} />
-            <InstancedPlants plants={roomPlants} materials={materials} castDynamicShadows={shadowsEnabled} />
-            <InstancedRoomBenches rooms={dressedRooms} materials={materials} castDynamicShadows={shadowsEnabled} />
             <ReadingRoomDetails layout={layout} />
             <GalleryDisplayFurniture layout={layout} materials={materials} />
             {/* Place sconces on the solid wall between galleries, clear of the
@@ -693,4 +639,4 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
             <InstancedWallSconces placements={sconcePlacements} />
         </group>
     )
-}
+})

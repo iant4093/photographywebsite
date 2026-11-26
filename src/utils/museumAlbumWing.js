@@ -20,12 +20,18 @@ export const ALBUM_DOOR_HALF_WIDTH = 1.65
 export const ALBUM_ARCH_DEPTH = 0.36
 export const ALBUM_HANG_HEIGHT = 2.38
 
+const MAX_PRINT_WIDTH = 2.55
+
 export function albumPrintWidth(aspect) {
-    return Math.min(2.55, 1.88 * aspect)
+    return Math.min(MAX_PRINT_WIDTH, 1.88 * aspect)
 }
 
 export const RETURN_PRINT_ASPECT = 1200 / 780
 export const ALBUM_FRAME_BORDER = 0.34
+const BENCH_RUG_LENGTH = 2.25
+const PRINT_SPACING = 4.15
+const BENCH_OFFSET = 2.1
+const END_MARGIN = 1.9
 
 function exitRoom(front) {
     const length = 6.8
@@ -43,7 +49,6 @@ export function buildMuseumAlbumWing(album, images) {
         const count = Math.min(6, images.length - index)
         const width = 8.6 + random() * 1.4
         const firstSide = random() < 0.5 ? 1 : -1
-        const gap = 1.25
         const prints = images.slice(index, index + count).map((image, slot) => {
             const side = slot % 2 ? -firstSide : firstSide
             const aspect = image?.width > 0 && image?.height > 0 ? image.width / image.height : 1.5
@@ -52,25 +57,23 @@ export function buildMuseumAlbumWing(album, images) {
                 position: [side * (width / 2 - 0.055), ALBUM_HANG_HEIGHT, 0], rotationY: -side * Math.PI / 2 }
         })
         const walls = [-1, 1].map(side => prints.filter(print => print.position[0] * side > 0))
-        const spans = walls.map(wall => wall.reduce((sum, print) => sum + print.frameWidth, 0)
-            + Math.max(0, wall.length - 1) * gap)
-        const length = Math.max(...spans) + 3.8
-        walls.forEach((wall, sideIndex) => {
-            let edge = front - (length - spans[sideIndex]) / 2
-            for (const print of wall) {
-                print.position[2] = edge - print.frameWidth / 2
-                edge -= print.frameWidth + gap
-            }
-        })
+        // Opposite walls share the same hanging grid. A portrait occupies
+        // the same slot as a landscape, including in a partially filled bay.
+        const rows = Math.ceil(count / 2)
+        const length = (rows - 1) * PRINT_SPACING + MAX_PRINT_WIDTH + ALBUM_FRAME_BORDER + 2 * END_MARGIN
         const back = front - length
-        const benches = walls.flatMap((wall, sideIndex) => wall.slice(1).map((print, i) => {
-            const previousEdge = wall[i].position[2] - wall[i].frameWidth / 2
-            const nextEdge = print.position[2] + print.frameWidth / 2
-            return { position: [(sideIndex ? 1 : -1) * width * 0.235, 0.42, (previousEdge + nextEdge) / 2],
-                size: [0.78, 0.42, 1.85] }
-        }))
+        const firstZ = (front + back + (rows - 1) * PRINT_SPACING) / 2
+        const benches = []
+        walls.forEach((wall, sideIndex) => {
+            const x = sideIndex ? BENCH_OFFSET : -BENCH_OFFSET
+            wall.forEach((print, row) => {
+                print.position[2] = firstZ - row * PRINT_SPACING
+                if (row > 0) benches.push({ position: [x, 0.42, print.position[2] + PRINT_SPACING / 2],
+                    size: [0.78, 0.42, 1.85], rugLength: BENCH_RUG_LENGTH })
+            })
+        })
         if (!benches.length) {
-            benches.push({ position: [firstSide * width * 0.235, 0.42, (front + back) / 2], size: [0.78, 0.42, 1.85] })
+            benches.push({ position: [firstSide * BENCH_OFFSET, 0.42, firstZ], size: [0.78, 0.42, 1.85], rugLength: BENCH_RUG_LENGTH })
         }
         const plants = [-1, 1].map(side => {
             const renderVariant = (room + (side === 1 ? 1 : 0)) % 2

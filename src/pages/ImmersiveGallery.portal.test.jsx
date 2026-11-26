@@ -129,6 +129,43 @@ describe('museum painting portals', () => {
         expect(screen.getByTestId('gallery-location')).toHaveTextContent(path)
     })
 
+    it('reuses the prepared room on entry and keeps it resident through the return', async () => {
+        await gallery({ touch: true })
+        fireEvent.click(screen.getByRole('button', { name: 'Begin walk-through' }))
+        await act(async () => { await canvasState.scene.onOpenAlbum(painting) })
+        const prepared = canvasState.scene.preparedWing
+        expect(prepared).toBe(canvasState.scene.trip.destination)
+        act(() => { canvasState.scene.onCross() })
+        act(() => { canvasState.scene.onArrive() })
+        act(() => { void canvasState.scene.onOpenAlbum(prepared.portals[1]) })
+        act(() => { canvasState.scene.onCross() })
+        act(() => { canvasState.scene.onArrive() })
+        expect(canvasState.scene.wing).toBeNull()
+        expect(canvasState.scene.preparedWing).toBe(prepared)
+        await act(async () => { await canvasState.scene.onOpenAlbum(painting) })
+        expect(canvasState.scene.trip.destination).toBe(prepared)
+    })
+
+    it('cancels a pending album with a fresh E press and allows another attempt', async () => {
+        let finishFirst
+        api.fetchAlbumForViewing.mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve }))
+        const { canvas } = await gallery()
+        fireEvent.click(screen.getByRole('button', { name: 'Begin walk-through' }))
+        act(() => { void canvasState.scene.onOpenAlbum(painting) })
+        const signal = api.fetchAlbumForViewing.mock.calls[0][2].signal
+        expect(screen.getByRole('button', { name: /E.*Cancel/ })).toBeVisible()
+        fireEvent.keyDown(canvas, { code: 'KeyE', repeat: true })
+        expect(signal.aborted).toBe(false)
+        fireEvent.keyDown(canvas, { code: 'KeyE' })
+        expect(signal.aborted).toBe(true)
+        expect(canvasState.scene.controlsEnabled.locked).toBe(true)
+        expect(canvasState.scene.portalBusy).toBe(false)
+        await act(async () => { finishFirst({ album, images: [image] }) })
+        expect(canvasState.scene.trip).toBeNull()
+        await act(async () => { await canvasState.scene.onOpenAlbum(painting) })
+        expect(canvasState.scene.trip.phase).toBe('jump')
+    })
+
     it('drops a cancelled load even if the response arrives after unlocking', async () => {
         let resolve
         api.fetchAlbumForViewing.mockImplementationOnce(() => new Promise(done => { resolve = done }))
