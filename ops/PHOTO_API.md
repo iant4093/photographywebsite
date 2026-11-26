@@ -32,7 +32,7 @@ aws cloudformation deploy --region us-east-1 --stack-name "$api_stack" \
 Invoke the publisher while traffic is paused. Check that the returned album and photo totals are plausible and the invocation has no `FunctionError`.
 
 ```sh
-aws lambda invoke --region us-east-1 --cli-read-timeout 630 \
+aws lambda invoke --region us-east-1 --cli-read-timeout 930 \
   --function-name ian-photography-public-photos-publisher "$api_build/result.json"
 cat "$api_build/result.json"
 ```

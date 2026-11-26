@@ -303,7 +303,7 @@ Resources:
       Handler: photo_api_publisher.handler
       Role: !GetAtt PublisherRole.Arn
       MemorySize: 512
-      Timeout: 600
+      Timeout: 900
       ReservedConcurrentExecutions: 1
       Code:
         S3Bucket: !Ref CatalogBucket

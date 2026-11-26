@@ -1,5 +1,6 @@
 """Regression checks for the exporter's public-only and fallback contracts."""
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import io
 import json
@@ -115,6 +116,25 @@ class PhotoApiTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "code limit"):
             publisher.selector_code({"cliffs": ["x" * 12000, 1, 0]}, b"test-key", 10)
 
+    def test_retries_write_only_missing_objects_in_an_immutable_catalog(self):
+        s3 = Mock()
+        paginator = s3.get_paginator.return_value
+        paginator.paginate.return_value = [
+            {"Contents": [{"Key": "catalog/version/all/0.json"}]},
+            {"Contents": [{"Key": "catalog/version/webp/640/all/0.json"}]},
+        ]
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            publisher.write_catalog(s3, "catalog", pool, "version", [
+                ("catalog/version/all/0.json", b"{}"),
+                ("catalog/version/webp/640/all/0.json", b"{}"),
+                ("catalog/version/webp/960/all/0.json", b"{}"),
+            ])
+        paginator.paginate.assert_called_once_with(Bucket="catalog", Prefix="catalog/version/")
+        s3.put_object.assert_called_once_with(
+            Bucket="catalog", Key="catalog/version/webp/960/all/0.json", Body=b"{}",
+            ContentType="application/json", CacheControl=publisher.CACHE_CONTROL,
+        )
+
     def test_handler_publishes_original_and_preview_catalogs_and_reuses_unchanged_state(self):
         album_id = "bf4c8aae-c8d1-43ad-8b3d-a163fc06b4c8"
         stored = {publisher.SIGNING_KEY: (b"a" * 64)}
@@ -142,6 +162,9 @@ class PhotoApiTest(unittest.TestCase):
             written_keys.append(Key)
         s3.get_object.side_effect = get_object
         s3.put_object.side_effect = put_object
+        s3.get_paginator.return_value.paginate.side_effect = lambda Bucket, Prefix: [
+            {"Contents": [{"Key": key} for key in stored if key.startswith(Prefix)]}
+        ]
 
         image_s3 = Mock()
         def head_object(Bucket, Key):

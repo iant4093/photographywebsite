@@ -322,6 +322,19 @@ def publish_selector(cloudfront, function, code):
     cloudfront.publish_function(Name=function, IfMatch=update["ETag"])
 
 
+def write_catalog(s3, bucket, pool, version, objects):
+    # A timed-out run may have written part of this immutable version before it reached the selector.
+    pages = s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=f"catalog/{version}/")
+    existing = {entry["Key"] for page in pages for entry in page.get("Contents", [])}
+
+    def write_object(item):
+        key, body = item
+        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json",
+                      CacheControl=CACHE_CONTROL)
+
+    list(pool.map(write_object, (item for item in objects if item[0] not in existing)))
+
+
 def handler(_event, _context):
     started = int(time.time())
     region = os.environ["IMAGES_REGION"]
@@ -350,10 +363,6 @@ def handler(_event, _context):
     })
     if len(album_ids) > MAX_ALBUMS:
         raise RuntimeError("Public catalog exceeds its album limit")
-    def write_object(item):
-        key, body = item
-        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json",
-                      CacheControl=CACHE_CONTROL)
 
     with ThreadPoolExecutor(max_workers=24) as pool:
         records = [entry for entry in pool.map(
@@ -395,7 +404,7 @@ def handler(_event, _context):
                     prefix = f"webp/{width}/"
                     album_objects.extend(catalog_objects(version, tier, prefix=prefix))
                     album_objects.extend(list_objects(version, tier, prefix=prefix))
-                list(pool.map(write_object, album_objects))
+                write_catalog(s3, bucket, pool, version, album_objects)
                 photos_written += len(photos)
             complete = len(photos) == len(images) and previews_complete
             index[slug] = {
@@ -416,7 +425,7 @@ def handler(_event, _context):
             global_objects = list(list_objects(global_version, all_photos, include_fallback=False))
             for width, tier in all_previews.items():
                 global_objects.extend(list_objects(global_version, tier, include_fallback=False, prefix=f"webp/{width}/"))
-            list(pool.map(write_object, global_objects))
+            write_catalog(s3, bucket, pool, global_version, global_objects)
     published = {slug: entry["pool"] for slug, entry in index.items() if entry["pool"][1]}
     previous_pools = {slug: entry["pool"] for slug, entry in previous.items() if entry["pool"][1]}
     selector_digest = hashlib.sha256(SELECTOR.read_bytes()).hexdigest()
