@@ -153,69 +153,6 @@ html[data-theme="dark"] .linen-site.linen-admin {
   background: var(--color-cream);
 }
 
-html[data-theme="dark"] .linen-site.linen-admin :is(
-  [class~="bg-white"],
-  [class*="bg-white/"],
-  .aws-cost-summary-card,
-  .aws-cost-panel,
-  .drive-usage-summary-card,
-  .drive-usage-panel
-) {
-  color: var(--color-charcoal);
-  background-color: rgba(38, 35, 30, 0.92);
-  border-color: var(--color-warm-border);
-}
-
-html[data-theme="dark"] .linen-site.linen-admin main :is(
-  form.bg-white,
-  div.bg-white[class*="border"],
-  a.bg-white[class*="border"]
-) {
-  background: rgba(38, 35, 30, 0.92);
-  border-color: var(--color-warm-border);
-  box-shadow:
-    0 0 0 1px rgba(255, 248, 235, 0.06) inset,
-    7px 8px 0 rgba(0, 0, 0, 0.2);
-}
-
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-amber,
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit,
-html[data-theme="dark"] .linen-site.linen-admin main form > button[type="submit"],
-html[data-theme="dark"] .linen-site.linen-admin main button.bg-amber,
-html[data-theme="dark"] .linen-site.linen-admin main a.bg-amber {
-  color: #fffaf2;
-  border-color: #d8c6b3;
-  background: #6f5038;
-}
-
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-amber:hover,
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit:hover,
-html[data-theme="dark"] .linen-site.linen-admin main form > button[type="submit"]:hover,
-html[data-theme="dark"] .linen-site.linen-admin main button.bg-amber:hover,
-html[data-theme="dark"] .linen-site.linen-admin main a.bg-amber:hover {
-  color: #ffffff;
-  background: #896548;
-}
-
-html[data-theme="dark"] .linen-site.linen-admin main :is(
-  .admin-upload-choice.bg-cream,
-  button.bg-cream,
-  a.bg-cream
-) {
-  color: #e5dbce;
-  border-color: #5d554c;
-  background: #2b2823;
-}
-
-html[data-theme="dark"] .linen-site.linen-admin main :is(
-  .admin-upload-choice.bg-cream,
-  button.bg-cream,
-  a.bg-cream
-):hover {
-  color: #fffaf2;
-  background: #39342d;
-}
-
 html[data-theme="dark"] .linen-site .contact-submit {
   color: #fffaf2;
   border-color: #d8c6b3;
@@ -231,24 +168,6 @@ html[data-theme="dark"] .linen-site .contact-submit:disabled {
   color: #bdb2a5;
   border-color: #514b43;
   background: #302c26;
-}
-
-html[data-theme="dark"] .linen-site.linen-admin [class~="bg-green-50"] {
-  color: #bbf7d0;
-  background-color: #173326;
-  border-color: #367554;
-}
-
-html[data-theme="dark"] .linen-site.linen-admin [class~="bg-red-50"] {
-  color: #fecaca;
-  background-color: #3b2020;
-  border-color: #7f3b3b;
-}
-
-html[data-theme="dark"] .linen-site.linen-admin :is(.aws-cost-error, .drive-usage-error) {
-  color: #fecaca;
-  background: #3b2020;
-  border-color: #7f3b3b;
 }
 
 .linen-site[data-theme="dark"] input[type="datetime-local"] {

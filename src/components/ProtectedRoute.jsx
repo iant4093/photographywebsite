@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import { Navigate } from 'react-router'
 import { useAuth } from '../context/auth'
+import './ProtectedRoute.css'
 
 // Wraps routes that require authentication
 // If adminOnly is true, also checks for Admins group membership

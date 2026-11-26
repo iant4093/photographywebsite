@@ -646,39 +646,6 @@
   box-shadow: 12px 12px 0 rgba(114, 95, 77, 0.08);
 }
 
-/* Admin studio — same materials, deliberately calmer than public galleries. */
-.linen-site.linen-admin main .admin-media-tile > button.admin-media-action {
-  opacity: 0;
-  pointer-events: none;
-  box-shadow: none;
-  transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease, scale 150ms ease;
-}
-
-.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-visible, :has(:focus-visible)) > .admin-media-action {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-visible, :has(:focus-visible)) > .admin-media-action:disabled {
-  opacity: 0.5;
-}
-
-.linen-site.linen-admin .admin-media-favorite {
-  color: var(--color-charcoal);
-  background-color: var(--color-cream-dark);
-}
-
-.linen-site.linen-admin .admin-media-favorite[aria-pressed="true"] {
-  color: #fff;
-  background-color: #e11d48;
-}
-
-.linen-site.linen-admin .admin-media-favorite:not(:disabled):is(:hover, :focus-visible) {
-  color: #fff;
-  background-color: #be123c;
-  scale: 1.1;
-}
-
 .linen-site.linen-admin {
   background:
     linear-gradient(rgba(243, 239, 230, 0.9), rgba(243, 239, 230, 0.9)),
@@ -687,122 +654,6 @@
 
 .linen-admin main {
   padding-inline: clamp(0.15rem, 1vw, 0.75rem);
-}
-
-.linen-admin main h1 {
-  font-weight: 400;
-  letter-spacing: -0.025em;
-}
-
-.linen-admin main form.bg-white,
-.linen-admin main div.bg-white[class*="border"],
-.linen-admin main a.bg-white[class*="border"] {
-  background: rgba(250, 247, 240, 0.72);
-  border-color: rgba(54, 45, 37, 0.68);
-  box-shadow:
-    0 0 0 1px rgba(255, 252, 245, 0.7) inset,
-    7px 8px 0 rgba(91, 70, 51, 0.065);
-}
-
-.linen-admin main form > button[type="submit"],
-.linen-admin main button.bg-amber,
-.linen-admin main a.bg-amber {
-  border: 1px solid var(--color-charcoal);
-  border-radius: 0;
-  background: var(--color-charcoal);
-  box-shadow: none;
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.11em;
-}
-
-.linen-admin main form > button[type="submit"]:hover,
-.linen-admin main button.bg-amber:hover,
-.linen-admin main a.bg-amber:hover {
-  background: var(--color-amber-dark);
-}
-
-.linen-admin .linen-admin-heading {
-  display: grid;
-  grid-template-columns: minmax(6rem, 0.24fr) minmax(0, 1fr);
-  gap: 0.45rem clamp(1rem, 3vw, 2.5rem);
-  align-items: end;
-  padding-block: 1rem;
-  border-block: 1px solid var(--color-charcoal);
-}
-
-.linen-admin .linen-admin-heading > span {
-  grid-row: 1 / span 2;
-  align-self: start;
-  padding-top: 0.25rem;
-  color: var(--color-amber-dark);
-  font-size: 0.59rem;
-  font-weight: 500;
-  letter-spacing: 0.17em;
-  text-transform: uppercase;
-}
-
-.linen-admin .linen-admin-heading h1,
-.linen-admin .linen-admin-heading p {
-  grid-column: 2;
-}
-
-.linen-admin .linen-admin-heading p {
-  margin-top: 0;
-}
-
-.linen-admin .linen-admin-card {
-  position: relative;
-  min-height: 15.5rem;
-  padding: 1.25rem;
-  border-color: rgba(54, 45, 37, 0.7);
-  box-shadow: 5px 6px 0 rgba(91, 70, 51, 0.07);
-}
-
-.linen-admin .linen-admin-card:hover {
-  border-color: var(--color-charcoal);
-  box-shadow: 8px 9px 0 rgba(91, 70, 51, 0.1);
-  transform: translateY(-2px);
-}
-
-.linen-admin .linen-admin-card-index {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  color: var(--color-warm-gray);
-  font-size: 0.56rem;
-  letter-spacing: 0.17em;
-}
-
-.linen-admin .linen-admin-icon {
-  width: 2.8rem;
-  height: 2.8rem;
-  border: 1px solid var(--color-charcoal);
-  border-radius: 0;
-  color: var(--color-charcoal);
-  background: transparent;
-  box-shadow: none;
-}
-
-.linen-admin .linen-admin-icon svg {
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-.linen-admin .linen-admin-card-link {
-  opacity: 1;
-  color: var(--color-amber-dark);
-  font-size: 0.64rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.linen-admin .linen-admin-card-link svg {
-  transition: transform 180ms ease;
-}
-
-.linen-admin .linen-admin-card:hover .linen-admin-card-link svg {
-  transform: translateX(3px);
 }
 
 /* Footer */
@@ -815,72 +666,6 @@
   font-family: var(--font-serif);
   font-size: clamp(1.5rem, 3vw, 2.3rem);
   line-height: 1;
-}
-
-.linen-site .editorial-progress {
-  --editorial-progress-offset: 0px;
-  position: fixed;
-  z-index: 45;
-  top: calc(74px + 0.75rem);
-  right: 0;
-  bottom: 0.75rem;
-  width: 44px;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  touch-action: none;
-  user-select: none;
-}
-
-.linen-site .editorial-progress::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0.25rem;
-  bottom: 0;
-  width: 14px;
-  border-inline: 1px solid rgba(41, 36, 31, 0.22);
-  background:
-    repeating-linear-gradient(180deg, rgba(41, 36, 31, 0.18) 0 1px, transparent 1px 12px),
-    linear-gradient(90deg, transparent 5px, rgba(41, 36, 31, 0.3) 5px 7px, transparent 7px);
-  pointer-events: none;
-}
-
-.linen-site .editorial-progress i {
-  position: absolute;
-  top: 0;
-  right: 0.25rem;
-  width: 14px;
-  height: clamp(5rem, 18vh, 9rem);
-  border: 1px solid rgba(41, 36, 31, 0.72);
-  background:
-    radial-gradient(circle at 2px 5px, var(--color-cream) 0 1.15px, transparent 1.4px) 0 0 / 100% 10px repeat-y,
-    radial-gradient(circle at calc(100% - 2px) 5px, var(--color-cream) 0 1.15px, transparent 1.4px) 0 0 / 100% 10px repeat-y,
-    linear-gradient(90deg, #312b26 0 3px, var(--color-amber) 3px 9px, #312b26 9px 12px);
-  box-shadow: 0 3px 9px rgba(41, 36, 31, 0.18);
-  transform: translate3d(0, var(--editorial-progress-offset), 0);
-  will-change: transform;
-  transition: none;
-  cursor: grab;
-}
-
-.linen-site .editorial-progress.is-dragging i {
-  cursor: grabbing;
-  transition: none;
-}
-
-/* Let scrolling drive the compositor directly where supported. The JS
-   position remains the fallback and owns the handle during pointer dragging. */
-@supports (animation-timeline: scroll(root block)) {
-  .linen-site .editorial-progress:not(.is-dragging) i {
-    animation: editorial-film-scroll 1s linear both;
-    animation-timeline: scroll(root block);
-  }
-}
-
-@keyframes editorial-film-scroll {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(0, var(--editorial-progress-travel, 0px), 0); }
 }
 
 /* Floating print wall — homepage only. */
@@ -1070,39 +855,8 @@
     grid-column: 1;
   }
 
-  .linen-admin .linen-admin-heading {
-    grid-template-columns: 1fr;
-  }
-
-  .linen-admin .linen-admin-heading > span {
-    grid-row: auto;
-  }
-
-  .linen-admin .linen-admin-heading h1,
-  .linen-admin .linen-admin-heading p {
-    grid-column: 1;
-  }
-
   .linen-site .linen-section-heading > p {
     display: none;
-  }
-
-  .linen-site .editorial-progress {
-    top: calc(74px + 0.5rem);
-    right: 0;
-    bottom: 0.5rem;
-    width: 44px;
-  }
-
-  .linen-site .editorial-progress::before {
-    right: 0.18rem;
-    width: 12px;
-  }
-
-  .linen-site .editorial-progress i {
-    right: 0.18rem;
-    width: 12px;
-    height: clamp(4rem, 16vh, 6rem);
   }
 
   .linen-site .floating-print-card {
@@ -1117,10 +871,6 @@
     --editorial-hover-scale: 0;
     transform: none !important;
     transition: none;
-  }
-
-  .linen-site .editorial-progress {
-    display: none;
   }
 
   .linen-site .editorial-motion-frame,

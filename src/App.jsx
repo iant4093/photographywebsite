@@ -4,7 +4,6 @@ import { Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router'
 import Navbar from './components/Navbar'
 const Footer = lazy(() => import('./components/Footer'))
-import ProtectedRoute from './components/ProtectedRoute'
 const BackToTop = lazy(() => import('./components/BackToTop'))
 import DocumentMetadata from './components/DocumentMetadata'
 const AnalyticsTracker = lazy(() => import('./components/AnalyticsTracker'))
@@ -16,6 +15,7 @@ import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 import { usesAdminChrome } from './utils/adminRoutes'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
+const ProtectedRoute = lazy(() => import('./components/ProtectedRoute'))
 const CameraCursor = lazy(() => import('./components/CameraCursor'))
 const MotionExperience = lazy(() => import('./components/MotionExperience'))
 const RouteCardMotion = lazy(() => import('./components/RouteCardMotion'))
