@@ -169,6 +169,7 @@ describe('App routing shell', () => {
     ['/apps', 'Apps route'], ['/apps/truongroom', 'truongroom coming soon route'], ['/apps/truongcam', 'TruongCam launch route'], ['/apps/truongnoiser', 'truongnoiser launch route'], ['/apps/truongscaler', 'truongscaler launch route'],
     ['/apps/truongflix', 'TruongFlix'], ['/apps/truongcleaner', 'TruongCleaner'],
     ['/apps/truongpaper', 'TruongPaper'], ['/apps/truongstream', 'TruongStream'],
+    ['/apps/truongphoto', 'TruongPhoto'], ['/apps/truongsync', 'TruongSync'],
     ['/admin', 'Admin route'], ['/admin/security', 'Admin security route'], ['/admin/costs', 'AWS costs route'], ['/admin/analytics', 'Website analytics route'], ['/admin/drive-usage', 'Google Drive usage route'], ['/admin/raw-photos', 'Raw photo viewer route'], ['/admin/github-analytics', 'GitHub analytics route'], ['/admin/site-health', 'Site health route'], ['/admin/audit-log', 'Audit log route'],
     ['/admin/upload', 'Upload route'], ['/admin/upload-video', 'Upload video route'],
     ['/admin/hero', 'Hero route'], ['/admin/favorites', 'Swipe favorites route'], ['/admin/recently-deleted', 'Recently deleted route'], ['/tv', 'TV mode route'],

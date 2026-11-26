@@ -40,6 +40,20 @@ function AppArt({ id }) {
                     <path d="m107 61 32 19-32 19V61ZM44 116h152" />
                     <circle cx="76" cy="116" r="3" fill="currentColor" />
                 </svg>
+            ) : id === 'truongphoto' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <path d="M42 108H28V24h158v14m0 80v18H46V40h140v18" />
+                    <path d="m46 122 40-35 24 19 22-16 34 28" />
+                    <circle cx="115" cy="67" r="9" />
+                    <circle cx="181" cy="86" r="26" />
+                    <path d="m200 105 19 19m-54-34 10-9 9 8 7-6 12 10" />
+                </svg>
+            ) : id === 'truongsync' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <path d="M37 28h46l17 17v82H37V28Zm15 8v18m10-18v18m10-18v18m10-15v15M52 106h33" />
+                    <rect x="157" y="62" width="50" height="65" rx="3" />
+                    <path d="M157 108h50m-39 10h4M113 70h31m-8-8 8 8-8 8m8 16h-31m8-8-8 8 8 8" />
+                </svg>
             ) : id === 'truongcleaner' ? (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <circle cx="92" cy="80" r="49" />

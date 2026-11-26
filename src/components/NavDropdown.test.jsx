@@ -191,7 +191,7 @@ describe('desktop navigation dropdowns', () => {
     expect(panelFor(explore)).not.toHaveAttribute('data-navigation-dismissal')
   })
 
-  it.each(['/editor', '/apps/truongroom', '/apps/truongcam', '/apps/truongnoiser', '/apps/truongscaler', '/apps/truongflix', '/apps/truongcleaner', '/apps/truongpaper', '/apps/truongstream'])('opens Apps on %s with the app links', async path => {
+  it.each(['/editor', '/apps/truongroom', '/apps/truongcam', '/apps/truongnoiser', '/apps/truongscaler', '/apps/truongflix', '/apps/truongphoto', '/apps/truongcleaner', '/apps/truongpaper', '/apps/truongsync', '/apps/truongstream'])('opens Apps on %s with the app links', async path => {
     const { container } = await routed(path)
     const apps = trigger(container, 'Apps')
     expect(apps).toHaveAttribute('href', '/apps')
@@ -207,8 +207,10 @@ describe('desktop navigation dropdowns', () => {
     expect(within(panel).getByRole('link', { name: /TruongNoiser Photo denoising for iPhone/ })).toHaveAttribute('href', '/apps/truongnoiser')
     expect(within(panel).getByRole('link', { name: /TruongScaler 2× photo upscaling for iPhone/ })).toHaveAttribute('href', '/apps/truongscaler')
     expect(within(panel).getByRole('link', { name: /TruongFlix Local media center for Mac and Windows/ })).toHaveAttribute('href', '/apps/truongflix')
+    expect(within(panel).getByRole('link', { name: /TruongPhoto Local photo and video library/ })).toHaveAttribute('href', '/apps/truongphoto')
     expect(within(panel).getByRole('link', { name: /TruongCleaner Storage cleaner for Mac/ })).toHaveAttribute('href', '/apps/truongcleaner')
     expect(within(panel).getByRole('link', { name: /TruongPaper Live wallpapers for Mac and Windows/ })).toHaveAttribute('href', '/apps/truongpaper')
+    expect(within(panel).getByRole('link', { name: /TruongSync Photo import, geotagging, and backup/ })).toHaveAttribute('href', '/apps/truongsync')
     expect(within(panel).getByRole('link', { name: /TruongStream USB camera and webcam studio/ })).toHaveAttribute('href', '/apps/truongstream')
     expect(panel.querySelector('[aria-current="page"]')).toHaveAttribute('href', path)
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })

@@ -21,8 +21,10 @@ function renderApps(path = '/apps') {
                 <Route path="/apps/truongnoiser" element={<PhotoApp moduleId="truongnoiser" />} />
                 <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
                 <Route path="/apps/truongflix" element={<DesktopApp moduleId="truongflix" />} />
+                <Route path="/apps/truongphoto" element={<DesktopApp moduleId="truongphoto" />} />
                 <Route path="/apps/truongcleaner" element={<DesktopApp moduleId="truongcleaner" />} />
                 <Route path="/apps/truongpaper" element={<DesktopApp moduleId="truongpaper" />} />
+                <Route path="/apps/truongsync" element={<DesktopApp moduleId="truongsync" />} />
                 <Route path="/apps/truongstream" element={<DesktopApp moduleId="truongstream" />} />
                 <Route path="/apps/photo-api" element={<PhotoApi />} />
             </Routes>
@@ -45,7 +47,11 @@ describe('Apps navigation', () => {
         renderApps()
         expect(screen.getByRole('heading', { name: 'Apps' })).toBeInTheDocument()
         const modules = screen.getByRole('region', { name: 'Apps' })
-        expect(within(modules).getAllByRole('link')).toHaveLength(10)
+        expect(within(modules).getAllByRole('link').map(link => link.getAttribute('href'))).toEqual([
+            '/editor', '/apps/truongroom', '/apps/truongflix', '/apps/truongphoto',
+            '/apps/photo-api', '/apps/truongpaper', '/apps/truongsync', '/apps/truongstream',
+            '/apps/truongcam', '/apps/truongnoiser', '/apps/truongscaler', '/apps/truongcleaner',
+        ])
         fireEvent.click(within(modules).getByRole('link', { name: /Web Editor/ }))
         expect(screen.getByRole('heading', { name: 'Existing photo editor' })).toBeInTheDocument()
     })
@@ -136,14 +142,16 @@ describe('Desktop app downloads', () => {
     afterEach(() => vi.restoreAllMocks())
 
     it.each([
-        ['TruongFlix', 'MacIntel', undefined, 'macOS', 'TruongFlix-macOS.dmg'],
-        ['TruongFlix', 'Win32', undefined, 'Windows', 'TruongFlix-Windows-Setup.exe'],
-        ['TruongFlix', 'Linux x86_64', { platform: 'Windows', mobile: false }, 'Windows', 'TruongFlix-Windows-Setup.exe'],
+        ['TruongFlix', 'MacIntel', undefined, 'macOS', 'TruongFlix-macOS.dmg', 6],
+        ['TruongFlix', 'Win32', undefined, 'Windows', 'TruongFlix-Windows-Setup.exe', 6],
+        ['TruongFlix', 'Linux x86_64', { platform: 'Windows', mobile: false }, 'Windows', 'TruongFlix-Windows-Setup.exe', 6],
+        ['TruongPhoto', 'MacIntel', undefined, 'macOS', 'TruongPhoto-macOS.dmg', 4],
+        ['TruongPhoto', 'Win32', undefined, 'Windows', 'TruongPhoto-Windows-Setup.exe', 4],
         ['TruongCleaner', 'MacIntel', undefined, 'macOS', 'TruongCleaner.dmg'],
         ['TruongPaper', 'MacIntel', undefined, 'macOS', 'TruongPaper-macOS.dmg', 4],
         ['TruongPaper', 'Win32', undefined, 'Windows', 'TruongPaper-Windows-Setup.exe', 4],
-        ['TruongStream', 'MacIntel', undefined, 'macOS', 'TruongStream-macOS.dmg', 2],
-        ['TruongStream', 'Win32', undefined, 'Windows', 'TruongStream-Windows-Setup.exe', 2],
+        ['TruongStream', 'MacIntel', undefined, 'macOS', 'TruongStream-macOS.dmg', 3],
+        ['TruongStream', 'Win32', undefined, 'Windows', 'TruongStream-Windows-Setup.exe', 3],
     ])('selects the primary installer for %s on %s', (title, platform, userAgentData, label, file, screenshotCount = 5) => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform, userAgentData })
         renderApps()
@@ -160,6 +168,7 @@ describe('Desktop app downloads', () => {
         ['truongflix', { platform: 'MacIntel', maxTouchPoints: 5 }, /Visit this page on your Mac or Windows computer/],
         ['truongcleaner', { platform: 'Linux armv8l', userAgent: 'Mozilla/5.0 (Linux; Android 14)' }, /Visit this page on your Mac/],
         ['truongpaper', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
+        ['truongphoto', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
         ['truongstream', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
     ])('shows desktop guidance for %s on mobile (%j)', (moduleId, device, message) => {
         vi.spyOn(window, 'navigator', 'get').mockReturnValue(device)
@@ -188,5 +197,18 @@ describe('Desktop app downloads', () => {
         expect(screen.getByRole('heading', { name: 'TruongStream', level: 1 })).toBeInTheDocument()
         expect(screen.getByRole('link', { name: /Full installation guide/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongStream#install')
         expect(screen.getByText(/simulated camera feed/)).toBeInTheDocument()
+    })
+
+    it('shows the TruongSync preview without offering unpublished installers', () => {
+        vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform: 'MacIntel' })
+        renderApps()
+        const card = screen.getByRole('link', { name: /TruongSync/ })
+        expect(card).toHaveTextContent('Coming soon')
+        fireEvent.click(card)
+        expect(screen.getByRole('heading', { name: 'TruongSync', level: 1 })).toBeInTheDocument()
+        expect(screen.getByText('Coming soon for Mac and Windows.')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /View on GitHub/ })).toHaveAttribute('href', 'https://github.com/iant4093/TruongSync')
+        expect(screen.queryByRole('link', { name: /Download for|installer|installation/i })).not.toBeInTheDocument()
+        expect(screen.getAllByRole('img')).toHaveLength(4)
     })
 })

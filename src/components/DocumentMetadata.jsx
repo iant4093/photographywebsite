@@ -6,20 +6,25 @@ const SITE_NAME = 'Ian Truong Photography'
 const PAGE_TITLES = {
     '/editor': 'Photo Editor',
     '/apps': 'Apps',
-    '/apps/truongroom': 'TruongRoom — Coming Soon',
-    '/apps/truongcam': 'TruongCam — RAW Camera for iPhone',
-    '/apps/truongnoiser': 'TruongNoiser — Photo Denoising for iPhone',
-    '/apps/truongscaler': 'TruongScaler — 2× Photo Upscaling for iPhone',
-    '/apps/truongflix': 'TruongFlix — Local Media Center for Mac and Windows',
-    '/apps/truongcleaner': 'TruongCleaner — Storage Cleaner for Mac',
-    '/apps/truongpaper': 'TruongPaper — Live Wallpapers',
-    '/apps/truongstream': 'TruongStream — USB Webcam Studio',
-    '/apps/photo-api': 'Photo API',
     '/privacy': 'Privacy Notice',
     '/terms': 'Terms & Photo Use',
     '/print-policy': 'Print Orders & Returns',
     '/accessibility': 'Accessibility & Help',
     '/licenses': 'Software Licenses',
+}
+const APP_PAGE_TITLES = {
+    __proto__: null,
+    truongroom: 'TruongRoom — Coming Soon',
+    truongcam: 'TruongCam — RAW Camera for iPhone',
+    truongnoiser: 'TruongNoiser — Photo Denoising for iPhone',
+    truongscaler: 'TruongScaler — 2× Photo Upscaling for iPhone',
+    truongflix: 'TruongFlix — Local Media Center for Mac and Windows',
+    truongphoto: 'TruongPhoto — Photo Library',
+    truongcleaner: 'TruongCleaner — Storage Cleaner for Mac',
+    truongpaper: 'TruongPaper — Live Wallpapers',
+    truongsync: 'TruongSync',
+    truongstream: 'TruongStream — USB Webcam Studio',
+    'photo-api': 'Photo API',
 }
 
 export default function DocumentMetadata() {
@@ -30,7 +35,7 @@ export default function DocumentMetadata() {
         canonical.rel = 'canonical'
         canonical.href = new URL(pathname, SITE_ORIGIN).href
         if (!canonical.parentNode) document.head.appendChild(canonical)
-        const pageTitle = PAGE_TITLES[pathname]
+        const pageTitle = pathname.startsWith('/apps/') ? APP_PAGE_TITLES[pathname.slice(6)] : PAGE_TITLES[pathname]
         document.title = pageTitle ? `${pageTitle} | ${SITE_NAME}` : SITE_NAME
     }, [pathname])
 
