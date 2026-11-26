@@ -25,6 +25,9 @@ Parameters:
   AlbumMediaTable:
     Type: String
     Default: GoldenHour-AlbumMedia-prod
+  PreviewMetadataTable:
+    Type: String
+    Default: GoldenHour-PreviewMetadata-prod
   PublisherCodeKey:
     Type: String
     Default: ''
@@ -262,6 +265,7 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${AlbumsTable}/index/VisibilityCreatedAtIndex'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${AlbumMediaTable}'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${PreviewMetadataTable}'
               - Effect: Allow
                 Action: dynamodb:GetItem
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${ImagesRegion}:${AWS::AccountId}:table/${AlbumsTable}'
@@ -308,6 +312,7 @@ Resources:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           CATALOG_BUCKET: !Ref CatalogBucket
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_REGION: !Ref ImagesRegion

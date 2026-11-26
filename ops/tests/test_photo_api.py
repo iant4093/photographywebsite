@@ -6,7 +6,9 @@ import json
 import os
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import urlsplit
 
+from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 from ops import photo_api_publisher as publisher
@@ -58,6 +60,21 @@ class PhotoApiTest(unittest.TestCase):
         with self.assertRaises(ClientError):
             publisher.build_photo(s3, "media", "photos.example.com", b"key", "approved", image)
 
+    def test_missing_or_oversized_previews_do_not_supply_an_original_image(self):
+        s3 = Mock()
+        key = "albums/approved/preview/v3/photo-w960.webp"
+        source_hash = "b" * 64
+        original = {"bytes": 1000}
+        s3.head_object.side_effect = ClientError({"Error": {"Code": "403"}}, "HeadObject")
+        self.assertEqual(publisher.build_preview(s3, "media", "photos.example.com", b"key", original,
+                                                 "960", [key, 640, source_hash]), (None, True))
+        s3.head_object.side_effect = None
+        s3.head_object.return_value = {
+            "ContentType": "image/webp", "ContentLength": 1100, "Metadata": {"source-sha256": source_hash},
+        }
+        self.assertEqual(publisher.build_preview(s3, "media", "photos.example.com", b"key", original,
+                                                 "960", [key, 640, source_hash]), (None, False))
+
     def test_list_objects_paginates_pools_and_handles_album_fallback(self):
         photos = [
             {"id": f"p{i}", "featured": i == 1, "fallbackUsed": False}
@@ -98,10 +115,22 @@ class PhotoApiTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "code limit"):
             publisher.selector_code({"cliffs": ["x" * 12000, 1, 0]}, b"test-key", 10)
 
-    def test_handler_writes_album_and_global_lists_and_reuses_unchanged_album_state(self):
+    def test_handler_publishes_original_and_preview_catalogs_and_reuses_unchanged_state(self):
         album_id = "bf4c8aae-c8d1-43ad-8b3d-a163fc06b4c8"
         stored = {publisher.SIGNING_KEY: (b"a" * 64)}
         written_keys = []
+        original_key = f"albums/{album_id}/a.jpg"
+        photo_id = publisher.photo_id(original_key)
+        other_id = publisher.photo_id(f"albums/{album_id}/b.jpg")
+        previews = {
+            width: f"albums/{album_id}/preview/v3/{photo_id}-w{width}.webp"
+            for width in (640, 960, 1440, 1920)
+        }
+        other_preview = f"albums/{album_id}/preview/v3/{other_id}-w640.webp"
+        preview_bytes = {640: 200, 960: 410, 1440: 800, 1920: 5100}
+        sizes_by_key = {key: preview_bytes[width] for width, key in previews.items()}
+        sizes_by_key[other_preview] = 190
+        source_hash = "b" * 64
 
         s3 = Mock()
         def get_object(Bucket, Key):
@@ -115,10 +144,31 @@ class PhotoApiTest(unittest.TestCase):
         s3.put_object.side_effect = put_object
 
         image_s3 = Mock()
-        image_s3.head_object.return_value = {"ContentLength": 5000, "ContentType": "image/jpeg"}
+        def head_object(Bucket, Key):
+            if Key in sizes_by_key:
+                return {"ContentLength": sizes_by_key[Key], "ContentType": "image/webp",
+                        "Metadata": {"source-sha256": source_hash}}
+            return {"ContentLength": 5000, "ContentType": "image/jpeg"}
+        image_s3.head_object.side_effect = head_object
 
         ddb = Mock()
-        ddb.query.return_value = {"Items": [{"albumId": {"S": album_id}}]}
+        preview_row = {
+            "mediaId": photo_id, "status": "ready", "previewVersion": 3,
+            "previewKeys": {str(width): key for width, key in previews.items()},
+            "dimensions": {str(width): {"width": width, "height": width * 3 // 4} for width in previews},
+            "sourceSha256": source_hash,
+        }
+        other_preview_row = {
+            **preview_row, "mediaId": other_id, "previewKeys": {**preview_row["previewKeys"], "640": other_preview},
+        }
+        serializer = TypeSerializer()
+        available_previews = []
+        def query(TableName, **_kwargs):
+            if TableName == "previews":
+                return {"Items": [{key: serializer.serialize(value) for key, value in row.items()}
+                                  for row in available_previews]}
+            return {"Items": [{"albumId": {"S": album_id}}]}
+        ddb.query.side_effect = query
         ddb.get_item.return_value = {
             "Item": {
                 "albumId": {"S": album_id},
@@ -153,6 +203,7 @@ class PhotoApiTest(unittest.TestCase):
             "IMAGES_REGION": "us-west-2",
             "ALBUMS_TABLE": "albums",
             "ALBUM_MEDIA_TABLE": "media",
+            "PREVIEW_METADATA_TABLE": "previews",
             "CATALOG_BUCKET": "catalog",
             "IMAGES_BUCKET": "images",
             "PHOTO_API_DOMAIN": "photos.example.com",
@@ -172,8 +223,36 @@ class PhotoApiTest(unittest.TestCase):
             album_version = state["albums"]["cliffs"]["pool"][0]
             self.assertIn(f"catalog/{album_version}/featured/page-0.json", stored)
             self.assertIn(f"catalog/{album_version}/all/0.json", stored)
+            first_original = json.loads(stored[f"catalog/{album_version}/featured/0.json"])
 
-            # Second run within retryAfter skips head_object and writes nothing.
+            # Preview readiness is detected without changing the album's original images.
+            written_keys.clear()
+            available_previews.extend([preview_row, other_preview_row])
+            self.assertTrue(publisher.handler({}, None)["published"])
+            state = json.loads(stored[publisher.STATE_KEY])
+            album_version, *album_counts = state["albums"]["cliffs"]["pool"]
+            global_version, *global_counts = state["global"]
+            self.assertEqual(album_counts, [2, 1, "*,1:1,1:1,"])
+            self.assertEqual(global_counts, album_counts)
+            original = json.loads(stored[f"catalog/{album_version}/featured/0.json"])
+            self.assertEqual(original, first_original)
+            self.assertEqual(set(original), {
+                "id", "albumSlug", "albumUrl", "imageUrl", "width", "height", "bytes", "featured", "fallbackUsed",
+            })
+            for width in (640, 960, 1440):
+                preview = json.loads(stored[f"catalog/{album_version}/webp/{width}/featured/0.json"])
+                expected_url = publisher.image_url("photos.example.com", b"a" * 64, previews[width])
+                self.assertEqual(preview, {**original, "imageUrl": expected_url, "width": width,
+                                           "height": width * 3 // 4, "bytes": preview_bytes[width]})
+                self.assertEqual(urlsplit(preview["imageUrl"]).hostname, "photos.example.com")
+                for version in (album_version, global_version):
+                    page = json.loads(stored[f"catalog/{version}/webp/{width}/featured/page-0.json"])
+                    self.assertEqual(page, {"items": [preview], "fallbackUsed": False, "nextCursor": None})
+            self.assertIn(f"catalog/{album_version}/webp/640/all/1.json", stored)
+            self.assertNotIn(f"catalog/{album_version}/webp/960/all/1.json", stored)
+            self.assertNotIn(f"catalog/{album_version}/webp/1920/all/0.json", stored)
+
+            # Another run within retryAfter skips head_object and writes nothing.
             written_keys.clear()
             image_s3.head_object.reset_mock()
             second = publisher.handler({}, None)

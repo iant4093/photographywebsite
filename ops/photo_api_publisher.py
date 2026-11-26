@@ -6,6 +6,7 @@ from decimal import Decimal
 import hashlib
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -16,7 +17,7 @@ from urllib.parse import quote
 import boto3
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 SELECTOR = Path(__file__).with_name("photo_api_selector.js")
 STATE_KEY = "state/catalog.json"
@@ -27,7 +28,9 @@ MAX_ALBUMS = 250
 MAX_PHOTOS = 10_000
 MAX_PAGES = 20
 LIST_PAGE_SIZE = 200
-LIST_FORMAT_VERSION = "list-v1"
+CATALOG_FORMAT_VERSION = "preview-v3"
+PREVIEW_VERSION = 3
+PREVIEW_WIDTHS = ("640", "960", "1440", "1920")
 HEARTBEAT_SECONDS = 3600
 EXPIRY_SECONDS = 3 * 3600
 ROTATION_SECONDS = 14 * 86400
@@ -39,6 +42,7 @@ UNSAFE_SEGMENT = re.compile(r"[\\\x00-\x1f\x7f]")
 MISSING = {"403", "404", "AccessDenied", "NoSuchKey", "NotFound"}
 CLIENT_CONFIG = Config(connect_timeout=3, read_timeout=12, max_pool_connections=32,
                        retries={"mode": "standard", "total_max_attempts": 3})
+logger = logging.getLogger(__name__)
 
 
 def encoded(data):
@@ -98,7 +102,47 @@ def eligible_images(album, images):
     return [result[key] for key in sorted(result)]
 
 
-def load_album(ddb, albums, media, album_id):
+def preview_descriptors(ddb, table, album_id, images):
+    if not images:
+        return {}
+    try:
+        rows = {
+            row["mediaId"]: row for row in query_items(
+                ddb, TableName=table, KeyConditionExpression="albumId = :album",
+                ExpressionAttributeValues={":album": {"S": album_id}},
+                ProjectionExpression="mediaId,#status,previewVersion,previewKeys,dimensions,sourceSha256",
+                ExpressionAttributeNames={"#status": "status"},
+            )
+        }
+    except (BotoCoreError, ClientError, RuntimeError) as error:
+        logger.warning("photo_api_preview_metadata_unavailable error_type=%s", type(error).__name__)
+        return {}
+
+    descriptors = {}
+    for key, *_ in images:
+        media_id = photo_id(key)
+        row = rows.get(media_id)
+        if not row or row.get("status") != "ready" or row.get("previewVersion") != PREVIEW_VERSION:
+            continue
+        preview_keys = row.get("previewKeys")
+        sizes = row.get("dimensions")
+        source_hash = row.get("sourceSha256")
+        if (not isinstance(preview_keys, dict) or not isinstance(sizes, dict) or
+                not isinstance(source_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", source_hash)):
+            continue
+        for width in PREVIEW_WIDTHS:
+            expected = f"albums/{album_id}/preview/v{PREVIEW_VERSION}/{media_id}-w{width}.webp"
+            size = sizes.get(width)
+            if (preview_keys.get(width) != expected or not isinstance(size, dict) or
+                    dimensions(size, "width") != int(width)):
+                continue
+            height = dimensions(size, "height")
+            if height:
+                descriptors.setdefault(media_id, {})[width] = [expected, height, source_hash]
+    return descriptors
+
+
+def load_album(ddb, albums, media, previews, album_id):
     album = deserialize(ddb.get_item(TableName=albums, Key={"albumId": {"S": album_id}},
                                      ConsistentRead=True).get("Item", {}))
     slug = album.get("slug")
@@ -108,7 +152,8 @@ def load_album(ddb, albums, media, album_id):
     if album.get("mediaStoreVersion") == 1:
         images = query_items(ddb, TableName=media, KeyConditionExpression="albumId = :album",
                              ExpressionAttributeValues={":album": {"S": album_id}}, ConsistentRead=True)
-    return slug, eligible_images(album, images)
+    eligible = eligible_images(album, images)
+    return slug, eligible, preview_descriptors(ddb, previews, album_id, eligible)
 
 
 def read_private(s3, bucket, key):
@@ -132,25 +177,37 @@ def signing_key(s3, bucket):
     return current
 
 
-def build_photo(s3, bucket, domain, secret, slug, image):
-    key, featured, width, height = image
+def photo_id(key):
+    return hashlib.sha256(key.encode()).hexdigest()[:24]
+
+
+def image_url(domain, secret, key):
+    key_token = base64.urlsafe_b64encode(key.encode()).rstrip(b"=")
+    signature = hmac.new(secret, key_token, hashlib.sha256).hexdigest()
+    return f"https://{domain}/v1/images/{signature}/{key_token.decode()}"
+
+
+def head_image(s3, bucket, key):
     try:
-        metadata = s3.head_object(Bucket=bucket, Key=key)
+        return s3.head_object(Bucket=bucket, Key=key)
     except ClientError as error:
         if error.response["Error"]["Code"] in MISSING:
-            return None
+            return {}
         raise
+
+
+def build_photo(s3, bucket, domain, secret, slug, image):
+    key, featured, width, height = image
+    metadata = head_image(s3, bucket, key)
     if metadata.get("ContentType", "").split(";", 1)[0] not in {"image/jpeg", "image/png", "image/webp"}:
         return None
     if metadata.get("ContentLength", 0) <= 0:
         return None
-    key_token = base64.urlsafe_b64encode(key.encode()).rstrip(b"=")
-    signature = hmac.new(secret, key_token, hashlib.sha256).hexdigest()
     return {
-        "id": hashlib.sha256(key.encode()).hexdigest()[:24],
+        "id": photo_id(key),
         "albumSlug": slug,
         "albumUrl": "https://iantruongphotography.com/album/" + quote(slug),
-        "imageUrl": f"https://{domain}/v1/images/{signature}/{key_token.decode()}",
+        "imageUrl": image_url(domain, secret, key),
         "width": width,
         "height": height,
         "bytes": metadata["ContentLength"],
@@ -159,7 +216,24 @@ def build_photo(s3, bucket, domain, secret, slug, image):
     }
 
 
-def catalog_objects(version, photos):
+def build_preview(s3, bucket, domain, secret, photo, width, descriptor):
+    key, height, source_hash = descriptor
+    try:
+        metadata = head_image(s3, bucket, key)
+    except (BotoCoreError, ClientError) as error:
+        logger.warning("photo_api_preview_object_unavailable error_type=%s", type(error).__name__)
+        return None, True
+    length = metadata.get("ContentLength", 0)
+    if (metadata.get("ContentType") != "image/webp" or length <= 0 or
+            metadata.get("Metadata", {}).get("source-sha256") != source_hash):
+        return None, True
+    if length >= photo["bytes"]:
+        return None, False
+    return {**photo, "imageUrl": image_url(domain, secret, key),
+            "width": int(width), "height": height, "bytes": length}, False
+
+
+def catalog_objects(version, photos, prefix=""):
     featured = [photo for photo in photos if photo["featured"]]
     pools = {"all": photos}
     if featured:
@@ -168,10 +242,10 @@ def catalog_objects(version, photos):
         pools["fallback"] = [{**photo, "fallbackUsed": True} for photo in photos]
     for name, pool in pools.items():
         for index, photo in enumerate(pool):
-            yield f"catalog/{version}/{name}/{index}.json", encoded(photo)
+            yield f"catalog/{version}/{prefix}{name}/{index}.json", encoded(photo)
 
 
-def list_objects(version, photos, include_fallback=True, page_size=LIST_PAGE_SIZE):
+def list_objects(version, photos, include_fallback=True, page_size=LIST_PAGE_SIZE, prefix=""):
     featured = [photo for photo in photos if photo["featured"]]
     pools = []
     if photos:
@@ -190,7 +264,29 @@ def list_objects(version, photos, include_fallback=True, page_size=LIST_PAGE_SIZ
                 "fallbackUsed": fallback_used,
                 "nextCursor": next_cursor,
             })
-            yield f"catalog/{version}/{name}/page-{page}.json", body
+            yield f"catalog/{version}/{prefix}{name}/page-{page}.json", body
+
+
+def pool_counts(photos):
+    return [len(photos), sum(photo["featured"] for photo in photos)]
+
+
+def pool_info(version, photos, previews):
+    originals = pool_counts(photos)
+    tiers = []
+    for width in PREVIEW_WIDTHS:
+        counts = pool_counts(previews[width])
+        # Each tier is empty, shares the original counts, or has its own all:featured counts.
+        if not counts[0]:
+            tiers.append("")
+        elif counts == originals:
+            tiers.append("*")
+        else:
+            tiers.append(f"{counts[0]}:{counts[1]}")
+    info = [version, *originals]
+    if any(tiers):
+        info.append(",".join(tiers))
+    return info
 
 
 def compact_selector(source):
@@ -205,14 +301,14 @@ def compact_selector(source):
 
 def selector_code(albums, secret, expires, global_pool=None):
     source = compact_selector(SELECTOR.read_bytes())
-    marker = b"const snapshot = null;"
-    if source.count(marker) != 1:
+    marker = rb"\bsnapshot\s*=\s*null\b"
+    if len(re.findall(marker, source)) != 1:
         raise RuntimeError("Edge selector snapshot marker is missing")
     payload = {"albums": albums, "signingKey": secret.decode(), "expires": expires * 1000}
     if global_pool is not None:
         payload["global"] = global_pool
     snapshot = encoded(payload)
-    code = source.replace(marker, b"const snapshot = " + snapshot + b";")
+    code = re.sub(marker, lambda _: b"snapshot=" + snapshot, source)
     if len(code) > MAX_FUNCTION_BYTES:
         raise RuntimeError("Edge selector exceeds the CloudFront Functions code limit")
     return code
@@ -234,6 +330,7 @@ def handler(_event, _context):
     ddb = boto3.client("dynamodb", region_name=region, config=CLIENT_CONFIG)
     albums = os.environ["ALBUMS_TABLE"]
     media = os.environ["ALBUM_MEDIA_TABLE"]
+    preview_table = os.environ["PREVIEW_METADATA_TABLE"]
     bucket = os.environ["CATALOG_BUCKET"]
     images_bucket = os.environ["IMAGES_BUCKET"]
     domain = os.environ["PHOTO_API_DOMAIN"]
@@ -259,13 +356,16 @@ def handler(_event, _context):
                       CacheControl=CACHE_CONTROL)
 
     with ThreadPoolExecutor(max_workers=24) as pool:
-        records = [entry for entry in pool.map(lambda aid: load_album(ddb, albums, media, aid), album_ids) if entry]
-        if sum(len(images) for _, images in records) > MAX_PHOTOS:
+        records = [entry for entry in pool.map(
+            lambda aid: load_album(ddb, albums, media, preview_table, aid), album_ids
+        ) if entry]
+        if sum(len(images) for _, images, _ in records) > MAX_PHOTOS:
             raise RuntimeError("Public catalog exceeds its photo limit")
-        for slug, images in records:
+        for slug, images, descriptors in records:
             if slug in index:
                 raise RuntimeError("Public catalog has duplicate album slugs")
-            source = digest([slug, domain, signing_key_id, started // ROTATION_SECONDS, images])
+            source = digest([CATALOG_FORMAT_VERSION, slug, domain, signing_key_id,
+                             started // ROTATION_SECONDS, images, descriptors])
             old = previous.get(slug, {})
             if old.get("source") == source and old.get("retryAfter", 0) > started and isinstance(old.get("photos"), list):
                 index[slug] = old
@@ -274,23 +374,49 @@ def handler(_event, _context):
             photos = [photo for photo in pool.map(
                 lambda image: build_photo(image_s3, images_bucket, domain, secret, slug, image), images
             ) if photo]
-            version = digest([source, photos, LIST_FORMAT_VERSION])
+            preview_candidates = [
+                (photo, width, descriptor) for photo in photos
+                for width, descriptor in descriptors.get(photo["id"], {}).items()
+            ]
+            previews = {width: [] for width in PREVIEW_WIDTHS}
+            previews_complete = True
+            for preview, retry in pool.map(
+                lambda candidate: build_preview(image_s3, images_bucket, domain, secret, *candidate),
+                preview_candidates,
+            ):
+                if preview:
+                    previews[str(preview["width"])].append(preview)
+                if retry:
+                    previews_complete = False
+            version = digest([source, photos, previews])
             if old.get("pool", [None])[0] != version:
                 album_objects = list(catalog_objects(version, photos)) + list(list_objects(version, photos))
+                for width, tier in previews.items():
+                    prefix = f"webp/{width}/"
+                    album_objects.extend(catalog_objects(version, tier, prefix=prefix))
+                    album_objects.extend(list_objects(version, tier, prefix=prefix))
                 list(pool.map(write_object, album_objects))
                 photos_written += len(photos)
+            complete = len(photos) == len(images) and previews_complete
             index[slug] = {
                 "source": source,
-                "pool": [version, len(photos), sum(photo["featured"] for photo in photos)],
+                "pool": pool_info(version, photos, previews),
                 "photos": photos,
-                "retryAfter": started + (ROTATION_SECONDS if len(photos) == len(images) else HEARTBEAT_SECONDS),
+                "previews": previews,
+                "retryAfter": started + (ROTATION_SECONDS if complete else HEARTBEAT_SECONDS),
             }
         all_photos = [photo for slug in sorted(index) for photo in index[slug]["photos"]]
-        featured_count = sum(1 for photo in all_photos if photo["featured"])
-        global_version = digest([LIST_FORMAT_VERSION, all_photos])
-        global_pool = [global_version, len(all_photos), featured_count]
+        all_previews = {
+            width: [photo for slug in sorted(index) for photo in index[slug]["previews"][width]]
+            for width in PREVIEW_WIDTHS
+        }
+        global_version = digest([CATALOG_FORMAT_VERSION, started // ROTATION_SECONDS, all_photos, all_previews])
+        global_pool = pool_info(global_version, all_photos, all_previews)
         if all_photos and state.get("global", [None])[0] != global_version:
-            list(pool.map(write_object, list_objects(global_version, all_photos, include_fallback=False)))
+            global_objects = list(list_objects(global_version, all_photos, include_fallback=False))
+            for width, tier in all_previews.items():
+                global_objects.extend(list_objects(global_version, tier, include_fallback=False, prefix=f"webp/{width}/"))
+            list(pool.map(write_object, global_objects))
     published = {slug: entry["pool"] for slug, entry in index.items() if entry["pool"][1]}
     previous_pools = {slug: entry["pool"] for slug, entry in previous.items() if entry["pool"][1]}
     selector_digest = hashlib.sha256(SELECTOR.read_bytes()).hexdigest()

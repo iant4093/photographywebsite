@@ -26,7 +26,7 @@ export default function PhotoApi() {
                 <header className="linen-section-heading mt-8">
                     <span>Developer tools</span>
                     <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">Photo API</h1>
-                    <p>Get a random photo or a paginated list of photos from the public galleries, each with a link to its full-resolution image.</p>
+                    <p>Get a random photo or a paginated list of photos from the public galleries. Choose full-resolution downloads or smaller WebP previews.</p>
                 </header>
 
                 <section className="mt-10" aria-labelledby="photo-api-start">
@@ -66,10 +66,17 @@ export default function PhotoApi() {
                     </dl>
                 </section>
 
+                <section className="mt-10" aria-labelledby="photo-api-previews">
+                    <h2 id="photo-api-previews" className="font-serif text-3xl text-charcoal">Request WebP previews</h2>
+                    <p>Add <code>preview=webp</code> to either endpoint. The default width is 960 pixels. Use <code>width</code> with <code>preview=webp</code> to select <code>640</code>, <code>960</code>, <code>1440</code>, or <code>1920</code> pixels. The response uses the same fields, with <code>imageUrl</code>, <code>width</code>, <code>height</code>, and <code>bytes</code> describing the selected preview.</p>
+                    <pre><code>{`curl -fsS '${randomEndpoint}?featured=true&preview=webp&width=640'\ncurl -fsS '${listEndpoint}?preview=webp&width=1440'`}</code></pre>
+                    <p>Preview requests include photos with an available WebP file at the selected width that is smaller than the original. If the requested pool has no eligible previews, the API returns <code>404</code>. When paginating, keep the same preview width and filters on each request.</p>
+                </section>
+
                 <section className="mt-10" aria-labelledby="photo-api-response">
                     <h2 id="photo-api-response" className="font-serif text-3xl text-charcoal">Read the response</h2>
-                    <p>Use <code>imageUrl</code> to download the full-resolution file. Each photo includes <code>id</code>, <code>albumSlug</code>, <code>albumUrl</code>, <code>width</code>, <code>height</code>, and <code>bytes</code>. <code>featured</code> describes the selected photo, and <code>fallbackUsed</code> tells you whether an album request fell back to all its photos.</p>
-                    <p><code>/v1/photos/random</code> returns one photo object and draws again on every request, so a photo can repeat. <code>/v1/photos</code> returns <code>{`{ items, fallbackUsed, nextCursor }`}</code> with up to 200 photo objects per page; pass <code>nextCursor</code> as <code>cursor</code> until it is <code>null</code>.</p>
+                    <p>Use <code>imageUrl</code> to download the selected file. Each photo includes <code>id</code>, <code>albumSlug</code>, <code>albumUrl</code>, <code>width</code>, <code>height</code>, and <code>bytes</code>. <code>featured</code> describes the selected photo, and <code>fallbackUsed</code> tells you whether an album request fell back to all its eligible photos.</p>
+                    <p><code>/v1/photos/random</code> returns one photo object and draws again on every request, so a photo can repeat. <code>/v1/photos</code> returns <code>{`{ items, fallbackUsed, nextCursor }`}</code> with up to 200 photo objects per page. Pass <code>nextCursor</code> as <code>cursor</code> until it is <code>null</code>.</p>
                     <p>Downloads can be large. Use <code>bytes</code> to check the size first and reuse the downloaded file when you need the same photo again.</p>
                 </section>
 

@@ -4,10 +4,15 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import vm from 'node:vm'
 
-const source = readFileSync(new URL('../photo_api_selector.js', import.meta.url), 'utf8')
+const source = readFileSync(process.env.PHOTO_API_SELECTOR ?? new URL('../photo_api_selector.js', import.meta.url), 'utf8')
+const snapshotMarker = /\bsnapshot\s*=\s*null\b/
 const signingKey = 'test-key'
-const albums = { cliffs: ['cliffs-version', 2, 1], dunes: ['dunes-version', 1, 0], epic: ['epic-version', 250, 205] }
-const globalPool = ['global-version', 253, 206]
+const albums = {
+    dunes: ['dunes-version', 1, 0],
+    cliffs: ['cliffs-version', 2, 1, '*,1:0,,'],
+    epic: ['epic-version', 250, 205, '240:205,220:202,201:200,120:90'],
+}
+const globalPool = ['global-version', 253, 206, '242:206,221:202,201:200,120:90']
 
 function select(uri, querystring = {}, { random = 0, expires = 2000, method = 'GET', global = globalPool } = {}) {
     const context = {
@@ -17,7 +22,7 @@ function select(uri, querystring = {}, { random = 0, expires = 2000, method = 'G
         Math: { random: () => random, floor: Math.floor, ceil: Math.ceil },
     }
     const payload = global === null ? { albums, signingKey, expires } : { albums, global, signingKey, expires }
-    const code = source.replace('const snapshot = null;', `const snapshot = ${JSON.stringify(payload)};`)
+    const code = source.replace(snapshotMarker, () => `snapshot=${JSON.stringify(payload)}`)
     vm.runInNewContext(code, context)
     return context.handler({
         request: { uri, querystring, method, headers: { range: { value: 'bytes=1-2' } } },
@@ -37,7 +42,7 @@ test('picks by photo count, resolves featured pools and keeps the album fallback
             Date: { now: () => 1000 },
             Math: { random: () => random, floor: Math.floor, ceil: Math.ceil },
         }
-        const code = source.replace('const snapshot = null;', `const snapshot = ${JSON.stringify({ albums: smallAlbums, signingKey, expires: 2000 })};`)
+        const code = source.replace(snapshotMarker, () => `snapshot=${JSON.stringify({ albums: smallAlbums, signingKey, expires: 2000 })}`)
         vm.runInNewContext(code, context)
         return context.handler({ request: { uri: route, querystring: query, method: 'GET', headers: {} } })
     }
@@ -57,6 +62,47 @@ test('lists paginated photo pools for global, featured, album and album fallback
     assert.equal(select(listRoute, { album: { value: 'cliffs' }, featured }).uri, '/catalog/cliffs-version/featured/page-0.json')
     assert.equal(select(listRoute, { album: { value: 'dunes' }, featured }).uri, '/catalog/dunes-version/fallback/page-0.json')
     assert.equal(select(listRoute, { album: { value: 'epic' }, cursor: { value: '1' } }).uri, '/catalog/epic-version/all/page-1.json')
+})
+
+test('opts into a distinct WebP pool for random, featured, album and paginated requests', () => {
+    const preview = { value: 'webp' }
+    const cliffs = { value: 'cliffs' }
+    const dunes = { value: 'dunes' }
+    const cursor = { value: '1' }
+    assert.equal(select(route, { preview }).uri, '/catalog/cliffs-version/webp/960/all/0.json')
+    assert.equal(select(route, { preview, width: { value: '960' } }).uri, '/catalog/cliffs-version/webp/960/all/0.json')
+    assert.equal(select(route, { featured, preview }).uri, '/catalog/epic-version/webp/960/featured/0.json')
+    assert.equal(select(route, { album: cliffs, featured, preview }).uri, '/catalog/cliffs-version/webp/960/fallback/0.json')
+    assert.equal(select(route, { album: dunes, preview }).statusCode, 404)
+    assert.equal(select(listRoute, { album: cliffs, featured, preview }).uri, '/catalog/cliffs-version/webp/960/fallback/page-0.json')
+    const list = select(listRoute, { featured, preview, cursor })
+    assert.equal(list.uri, '/catalog/global-version/webp/960/featured/page-1.json')
+    assert.deepEqual(Object.keys(list.querystring), [])
+    assert.equal(select(listRoute, { album: cliffs, preview, cursor }).statusCode, 400)
+    assert.equal(select(listRoute, { featured, preview }, { global: ['g', 5, 1, '*,1:0,,'] }).statusCode, 404)
+    assert.equal(select(listRoute, { preview: { value: 'jpeg' } }).statusCode, 400)
+    assert.equal(select(route, { preview: { value: 'webp', multiValue: [preview, preview] } }).statusCode, 400)
+})
+
+test('uses the counts and catalog path of the requested width', () => {
+    const preview = { value: 'webp' }
+    const cliffs = { value: 'cliffs' }
+    const width640 = { value: '640' }
+    const width1440 = { value: '1440' }
+    const width1920 = { value: '1920' }
+    const cursor = { value: '1' }
+    assert.equal(select(route, { featured, album: cliffs, preview, width: width640 }).uri,
+        '/catalog/cliffs-version/webp/640/featured/0.json')
+    assert.equal(select(route, { preview, width: width1920 }, { method: 'HEAD' }).uri,
+        '/catalog/epic-version/webp/1920/all/0.json')
+    assert.equal(select(listRoute, { preview, cursor, width: width1440 }).uri,
+        '/catalog/global-version/webp/1440/all/page-1.json')
+    assert.equal(select(listRoute, { featured, preview, cursor, width: width1440 }).statusCode, 400)
+    assert.equal(select(listRoute, { album: cliffs, preview, width: width1920 }).statusCode, 404)
+    assert.equal(select(route, { width: width640 }).statusCode, 400)
+    assert.equal(select(route, { preview, width: { value: '1280' } }).statusCode, 400)
+    assert.equal(select(listRoute, { preview, width: { value: '0640' } }).statusCode, 400)
+    assert.equal(select(listRoute, { preview, width: { ...width640, multiValue: [width640, width1440] } }).statusCode, 400)
 })
 
 test('rejects unknown or duplicate parameters, invalid cursors, unknown albums and direct origin paths', () => {
@@ -90,6 +136,7 @@ test('verifies the signed image path before rewriting it to a canonical S3 objec
     assert.equal(request.headers.range, undefined)
     assert.equal(select(path + 'a').statusCode, 404)
     assert.equal(select(path, { cache: { value: 'bust' } }).statusCode, 404)
+    assert.equal(select(imageRoute('albums/dunes/preview/v3/photo-w960.webp')).uri, '/albums/dunes/preview/v3/photo-w960.webp')
     assert.equal(select(imageRoute('albums/dunes/../private.jpg')).statusCode, 404)
     assert.equal(select(imageRoute('protected/private.jpg')).statusCode, 404)
 })

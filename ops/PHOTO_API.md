@@ -2,22 +2,24 @@
 
 The public endpoint is `https://photos-api.iantruongphotography.com/v1/photos/random`. Its reference page is at `/apps/photo-api`.
 
-The `ian-photography-public-photos` stack in `us-east-1` owns the dedicated CloudFront distribution, Free flat-rate subscription, WAF, catalog bucket, publisher, DNS, and bandwidth alarm. The main application stack owns the read grant on the existing media bucket. The grant checks the production distribution ARN and the object's current `visibility=public` tag. CloudFront sends full-size reads to that bucket with origin access control and an uncached image behavior. The publisher signs each image path and the selector verifies the signature before forwarding the request.
+The `ian-photography-public-photos` stack in `us-east-1` owns the dedicated CloudFront distribution, Free flat-rate subscription, WAF, catalog bucket, publisher, DNS, and bandwidth alarm. The main application stack owns the read grant on the existing media bucket. The grant checks the production distribution ARN and the object's current `visibility=public` tag. CloudFront sends image reads to that bucket with origin access control and an uncached image behavior. The publisher signs each image path and the selector verifies the signature before forwarding the request.
 
-The publisher polls the public album index every 15 minutes and confirms visibility against the primary album table. It writes new catalog objects before publishing a selector that references them. The selector draws uniformly across the requested pool. Catalog objects expire after 30 days and the publisher rotates them every 14 days. A stale selector closes both routes three hours after its last successful publication. Existing album visibility changes block full-size delivery as soon as the existing S3 tag changes. JSON fields from the last public snapshot can persist until the next refresh.
+The publisher polls the public album index every 15 minutes and confirms visibility against the primary album table. It writes new catalog objects before publishing a selector that references them. The selector draws uniformly across the requested pool. Catalog objects expire after 30 days and the publisher rotates them every 14 days. A stale selector closes both routes three hours after its last successful publication. Album visibility changes block image delivery as soon as the corresponding S3 tags change. JSON fields from the last public snapshot can persist until the next refresh.
+
+Append `preview=webp` to `/v1/photos/random` or `/v1/photos` to use the WebP catalog. The default width is 960 pixels. Set `width=640`, `width=960`, `width=1440`, or `width=1920` with `preview=webp` to select a tier. The publisher uses ready derivatives from `PreviewMetadataTable` and checks that the corresponding public S3 object matches the source metadata and is smaller than the original. The preview catalog keeps the same response fields and applies album, featured, fallback, and pagination rules to photos eligible at that width. Empty pools return `404`. Existing queries keep the full-resolution catalog.
 
 ## Release
 
 The edge stack is deployed separately from the site's attested `main` release. Use a dedicated AWS profile or verify the caller account first. On a new stack, create and publish a CloudFront Function from `photo_api_selector.js` with runtime `cloudfront-js-2.0`, then pass its ARN as `SelectorArn`. Keep `Traffic=paused` on the initial stack and verify the `FreeSubscription` output and its `FREE` tier before opening traffic. The main application's bucket policy must match the new distribution ID if the distribution is ever recreated.
 
-Build and upload the publisher artifact from the repository root.
+Install the locked Node dependencies with `npm ci`, then build and upload the publisher artifact from the repository root. The build minifies the selector to leave room for the production catalog snapshot.
 
 ```sh
 api_stack=ian-photography-public-photos
 api_bucket=$(aws cloudformation describe-stacks --region us-east-1 \
   --stack-name "$api_stack" --query 'Stacks[0].Outputs[?OutputKey==`CatalogBucket`].OutputValue | [0]' --output text)
 api_build=$(mktemp -d)
-zip -j "$api_build/publisher.zip" ops/photo_api_publisher.py ops/photo_api_selector.js
+bash ops/build_photo_api_publisher.sh "$api_build/publisher.zip"
 api_digest=$(shasum -a 256 "$api_build/publisher.zip" | cut -d ' ' -f 1)
 api_key="deployment/$api_digest.zip"
 aws s3 cp "$api_build/publisher.zip" "s3://$api_bucket/$api_key" --region us-east-1
@@ -36,6 +38,8 @@ cat "$api_build/result.json"
 ```
 
 After the main stack's bucket policy release succeeds, update the edge stack with `Traffic=live`. Check the base pick, a featured pick, both album modes, and a HEAD on a returned image URL. Check that duplicate query parameters fail and a modified image signature is rejected.
+
+For updates to a live stack, keep `Traffic=live` when deploying the template and publisher ZIP. Invoke the publisher, then check an existing full-resolution request, `/v1/photos/random?featured=true&preview=webp`, and `/v1/photos?preview=webp&width=640`. Confirm the preview URLs return `Content-Type: image/webp` and the reported byte counts, and compare the response widths with the default and requested values. Deploy the website documentation after verifying the edge update.
 
 ## Pause traffic
 
