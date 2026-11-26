@@ -14,20 +14,24 @@
     translate: 0 -100%;
 }
 
-main[data-route-page-staged],
-main[data-route-page-staged] ~ footer,
+main[data-route-page-staged]:not([data-route-page-waiting]),
+main[data-route-page-staged]:not([data-route-page-waiting]) ~ footer,
 main[data-route-page-preparing],
 main[data-route-page-preparing] ~ footer {
     opacity: 0;
 }
 
-main[data-route-page-staged]:not([data-route-page-revealing]),
-main[data-route-page-staged]:not([data-route-page-revealing]) ~ footer {
+main[data-route-page-staged]:not([data-route-page-revealing], [data-route-page-waiting]),
+main[data-route-page-staged]:not([data-route-page-revealing], [data-route-page-waiting]) ~ footer {
     pointer-events: none;
 }
 
-main[data-route-page-staged]:not([data-route-page-revealing]) .skeleton-shimmer {
+main[data-route-page-staged]:not([data-route-page-revealing], [data-route-page-waiting]) .skeleton-shimmer {
     animation-play-state: paused;
+}
+
+main[data-route-page-waiting] ~ [data-route-card-morph] {
+    visibility: hidden;
 }
 
 [data-route-card-morph] {

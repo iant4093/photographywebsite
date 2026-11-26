@@ -627,6 +627,7 @@ export default function RouteCardMotion() {
                 return
             }
             const stage = canStage && !opensPlayer ? stageCard(main, from, returning, record) : null
+            const waitForAlbum = stage && albumMorph && !inline
             let frame
             let release
             let resumeTracks
@@ -635,12 +636,21 @@ export default function RouteCardMotion() {
             let fontElement
             let titleFont
             let landingScroll
-            const started = performance.now()
+            let loadingObserver
+            let loadingTimer
+            let started = performance.now()
             const settleMs = returning ? 50 : record?.marker === 'floating' && from?.clipped ? 34 : 72
             const interruption = stage && returning ? new AbortController() : null
             const clearTitle = () => stagedTitle?.removeAttribute('data-route-title-landing')
+            const clearLoading = () => {
+                loadingObserver?.disconnect()
+                loadingObserver = undefined
+                clearTimeout(loadingTimer)
+                delete main.dataset.routePageWaiting
+            }
             const cleanup = () => {
                 interruption?.abort()
+                clearLoading()
                 clearTitle()
                 resumeTracks?.()
                 releaseNavbar?.()
@@ -682,15 +692,35 @@ export default function RouteCardMotion() {
                 }, listener)
             }
             const step = () => {
-                const elapsed = performance.now() - started
+                frame = undefined
                 const page = main.firstElementChild
                 if (returning && page && page.getAttribute('data-route-faded') !== 'return') page.setAttribute('data-route-faded', 'return')
-                const ready = !inline || Boolean(main.querySelector('[data-inline-album]')) !== returning
+                const committed = !waitForAlbum || main.querySelector('[data-route-content]')?.dataset.routeContent === runtime.location.pathname
+                const ready = committed && (!inline || Boolean(main.querySelector('[data-inline-album]')) !== returning)
                 const restored = !returning || !record || Math.abs(window.scrollY - record.scrollY) <= 3
                 if (returning && restored && record?.phases && !resumeTracks) resumeTracks = holdFloatingTracks(record.phases)
                 const to = ready && restored && record?.pose
-                    ? returning ? returnedCard(main, record) : headingPose(main.querySelector(inline ? '[data-inline-album] h2' : 'h1'))
+                    ? returning ? returnedCard(main, record) : headingPose(main.querySelector(
+                        inline ? '[data-inline-album] h2' : waitForAlbum ? '.linen-gallery-header h1' : 'h1',
+                    ))
                     : null
+                if (waitForAlbum && !to && (page?.hasAttribute('data-route-loading') || (committed && page?.getAttribute('aria-busy') === 'true'))) {
+                    if (!loadingObserver) {
+                        // Loading is separate from settling the destination geometry.
+                        // Leave the placeholders visible on slow requests and wake on commit.
+                        loadingTimer = window.setTimeout(() => { main.dataset.routePageWaiting = '' }, 200)
+                        loadingObserver = new MutationObserver(step)
+                        loadingObserver.observe(main, { childList: true, subtree: true, attributes: true,
+                            attributeFilter: ['aria-busy', 'data-route-content', 'data-route-loading'] })
+                    }
+                    return
+                }
+                if (loadingObserver) {
+                    clearLoading()
+                    started = performance.now()
+                    previousFrame = undefined
+                }
+                const elapsed = performance.now() - started
                 const matches = matchingTitles(from?.title, to?.title)
                 const edgeMorph = stage && albumMorph && (returning ? to?.edge && from.title : from.edge && to?.title)
                 const title = stage && (matches || (!returning && edgeMorph)) ? to.element : null

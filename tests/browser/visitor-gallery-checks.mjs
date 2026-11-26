@@ -1384,6 +1384,83 @@ async function routeCardMotionCase(width) {
     } finally { await context.close() }
 }
 
+async function slowAlbumTitleMotionCase(width, type) {
+    const { context, page, cdp } = await openCase({ width })
+    let releaseDetail, releaseCatalog
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        const video = type === 'video'
+        const { items, photos } = fixture(85)
+        const album = video ? { ...items[0], type: 'video', imageCount: 2 } : items[0]
+        const catalogPath = video ? '/videos' : '/'
+        const detailPath = `/${video ? 'video' : 'album'}/${album.albumId}`
+        const pendingDetail = new Promise(resolve => { releaseDetail = resolve })
+        const pendingCatalog = new Promise(resolve => { releaseCatalog = resolve })
+        let returning = false
+        await page.route(new RegExp(`/public/albums\\?[^#]*type=${type}(?:&|$)`), async route => {
+            if (returning) await pendingCatalog
+            await route.fulfill({ json: { items: video ? [album] : items, nextCursor: null } })
+        })
+        await page.route(`**/public/albums/${album.albumId}`, async route => {
+            await pendingDetail
+            await route.fulfill({ json: { album, images: video ? [] : photos } })
+        })
+        if (video) await page.goto(origin + catalogPath)
+        const card = page.locator(`.catalog-section [data-route-card="album"][href="${detailPath}"]`)
+        await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+        await page.evaluate(() => {
+            const main = document.getElementById('main-content')
+            window.__visitor.albumTitleMotions = {}
+            new MutationObserver(() => {
+                const mode = main.dataset.routePageMotion
+                if (!mode) return
+                window.__visitor.albumTitleMotions[mode] = [...document.querySelectorAll('.route-card-title')].some(title =>
+                    title.getAnimations().some(animation => {
+                        const frames = animation.effect.getKeyframes()
+                        return frames[0].transform && frames[0].transform !== frames.at(-1).transform
+                    }))
+            }).observe(main, { attributes: true, attributeFilter: ['data-route-page-motion'] })
+        })
+        const detailRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith(`/public/albums/${album.albumId}`))
+        await card.click()
+        await page.waitForURL(origin + detailPath)
+        await detailRequest
+        // Hold both responses beyond the previous morph timeout.
+        await page.waitForTimeout(850)
+        const detailLoaderVisible = await page.locator('main').evaluate(main => Number(getComputedStyle(main).opacity) > 0)
+        releaseDetail()
+        await page.locator('.linen-gallery-header h1').waitFor()
+        await page.waitForFunction(() => 'enter' in window.__visitor.albumTitleMotions)
+        await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
+
+        // Expire the in-memory and stored catalog so history restoration must
+        // wait for the cards to arrive again.
+        await page.evaluate(() => {
+            const now = Date.now.bind(Date)
+            Date.now = () => now() + 31 * 60_000
+        })
+        returning = true
+        const catalogRequest = page.waitForRequest(request => {
+            const url = new URL(request.url())
+            return url.pathname.endsWith('/public/albums') && url.searchParams.get('type') === type
+        })
+        if (video) await page.getByRole('button', { name: 'Back to Videos' }).click()
+        else await page.goBack()
+        await catalogRequest
+        await page.waitForTimeout(850)
+        const catalogLoaderVisible = await page.locator('main').evaluate(main => Number(getComputedStyle(main).opacity) > 0)
+        releaseCatalog()
+        await card.waitFor()
+        await page.waitForFunction(() => 'return' in window.__visitor.albumTitleMotions)
+        await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
+        assert.deepEqual(await page.evaluate(() => window.__visitor.albumTitleMotions), { enter: true, return: true })
+        assert.ok(detailLoaderVisible && catalogLoaderVisible, 'Loading placeholders are visible during slow navigation')
+        assert.equal(await page.locator('[data-route-title-landing], [data-route-card-morph]').count(), 0)
+        const result = { engine, width, check: `${type} album title travels after slow album and catalog responses`, passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
+    } finally { releaseDetail?.(); releaseCatalog?.(); await context.close() }
+}
+
 async function routeSectionMotionCase(width) {
     const { context, page, cdp } = await openCase({ width })
     try {
@@ -1993,8 +2070,14 @@ async function floatingEdgeCase(width) {
 }
 
 try {
-    const widths = engine === 'firefox' ? [1440] : [1440, 390]
+    const albumTitlesOnly = process.env.VISITOR_ALBUM_TITLES_ONLY === '1'
+    const widths = engine === 'firefox' || albumTitlesOnly ? [1440] : [1440, 390]
     for (const width of widths) {
+        if (albumTitlesOnly) {
+            await slowAlbumTitleMotionCase(width, 'photo')
+            await slowAlbumTitleMotionCase(width, 'video')
+            continue
+        }
         if (process.env.VISITOR_SHARE_HANDOFF_ONLY === '1') {
             await viewerCase(width, false, 'featured')
             continue
@@ -2018,6 +2101,8 @@ try {
             await mobileMediaMotionCase()
         } else {
             await routeCardMotionCase(width)
+            await slowAlbumTitleMotionCase(width, 'photo')
+            await slowAlbumTitleMotionCase(width, 'video')
             await albumLowerEdgeOpeningCase(width)
             await routeCardClipCase(width)
             await routeCardClipCase(width, true)
