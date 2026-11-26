@@ -30,14 +30,5 @@ export function applyDocumentTheme(theme, root = typeof document !== 'undefined'
   root.style.colorScheme = normalized
   const themeColor = root.ownerDocument?.querySelector('meta[name="theme-color"]')
   themeColor?.setAttribute('content', normalized === 'dark' ? '#171613' : '#faf8f5')
-  let darkStyles = root.ownerDocument?.getElementById('dark-theme-styles')
-  if (!darkStyles && normalized === 'dark' && root.ownerDocument) {
-    darkStyles = root.ownerDocument.createElement('link')
-    darkStyles.id = 'dark-theme-styles'
-    darkStyles.rel = 'stylesheet'
-    darkStyles.href = '/dark-theme.css'
-    root.ownerDocument.head.appendChild(darkStyles)
-  }
-  if (darkStyles) darkStyles.media = normalized === 'dark' ? 'all' : 'not all'
   return normalized
 }

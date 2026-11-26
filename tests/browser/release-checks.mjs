@@ -286,6 +286,27 @@ try {
   outcomes.push({check:'close cancels initial recovery save',afterCloseHasSource:Boolean(afterClose.name),afterLateSaveName:afterLateSave.name,recoveredAfterReload:false,passed:true})
   await context.close()
  }
+    {
+        const context = await contextFor(1440), page = await context.newPage()
+        try {
+            await page.goto(origin)
+            await page.getByRole('button', { name: 'Switch to dark mode' }).click()
+            await page.route('**/dark-theme.css', route => route.abort())
+            await page.reload({ waitUntil: 'commit' })
+            await page.getByRole('button', { name: 'Switch to light mode' }).waitFor()
+            const palette = await page.locator('.linen-nav').evaluate(nav => ({
+                navbar: getComputedStyle(nav).backgroundColor,
+                page: getComputedStyle(nav.closest('.linen-site')).backgroundColor,
+                body: getComputedStyle(document.body).backgroundColor,
+            }))
+            assert.deepEqual(palette, {
+                navbar: 'rgba(23, 22, 19, 0.94)',
+                page: 'rgb(23, 22, 19)',
+                body: 'rgb(23, 22, 19)',
+            })
+            outcomes.push({ check: 'saved dark palette is ready on refresh', passed: true })
+        } finally { await context.close() }
+    }
     for (const width of [1440,390]) {
         const context=await contextFor(width),page=await context.newPage()
         await page.route('**/theme-init.js',route=>route.abort())

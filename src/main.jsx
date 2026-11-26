@@ -6,6 +6,7 @@ import { AuthProvider } from './context/authContext'
 import App from './App'
 import './index.css'
 import './linen.css'
+import './dark-theme.css'
 import { registerPwa } from './utils/pwa'
 import { warmDirectAlbum } from './utils/albumEntry'
 

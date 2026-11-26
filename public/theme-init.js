@@ -11,13 +11,6 @@
   document.documentElement.style.colorScheme = theme
   var themeColor = document.querySelector('meta[name="theme-color"]')
   if (themeColor) themeColor.setAttribute('content', theme === 'dark' ? '#171613' : '#faf8f5')
-  if (theme === 'dark') {
-    var darkStyles = document.createElement('link')
-    darkStyles.id = 'dark-theme-styles'
-    darkStyles.rel = 'stylesheet'
-    darkStyles.href = '/dark-theme.css'
-    document.head.appendChild(darkStyles)
-  }
 }())
 
 // Discover the actual route's hero before the application bundle arrives.
