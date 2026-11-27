@@ -981,6 +981,43 @@ async function mobileScrollAndAutoplayCase() {
     } finally { await context.close() }
 }
 
+async function mobileToolbarLayoutCase() {
+    const width = 390
+    const expandedHeight = 790
+    const { context, page, cdp } = await openCase({ width })
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        await page.setViewportSize({ width, height: expandedHeight })
+        await page.addStyleTag({ content: 'html { overflow-anchor: none } .linen-back-to-top { animation: none; transition: none }' })
+        await page.evaluate(() => scrollTo({ top: 1100, behavior: 'instant' }))
+        const button = page.locator('.linen-back-to-top')
+        const rail = page.getByRole('scrollbar', { name: 'Page scroll position' })
+        await button.waitFor()
+        await rail.waitFor()
+        const positions = () => button.evaluate(element => {
+            const button = element.getBoundingClientRect()
+            const rail = document.querySelector('.editorial-progress').getBoundingClientRect()
+            return [button.top, button.bottom, rail.top, rail.bottom]
+        })
+        const before = await positions()
+        assert.ok(before.every(y => y >= 0 && y < expandedHeight), 'Both controls fit above the expanded toolbar')
+        // Playwright resizes the entire viewport, including svh. A phone
+        // toolbar only changes the current viewport, so hold its small height.
+        await page.addStyleTag({ content: `.linen-site { --linen-mobile-height: ${expandedHeight}px }` })
+        for (const height of [900, expandedHeight]) {
+            await page.setViewportSize({ width, height })
+            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+            const current = await positions()
+            assert.ok(current.every((y, index) => Math.abs(y - before[index]) < 1),
+                `The button and rail hold their positions while the toolbar changes (${before} vs ${current})`)
+        }
+        await button.tap()
+        await page.waitForFunction(() => scrollY < 1)
+        const result = { engine, width, check: 'mobile browser toolbar changes leave the scroll controls steady', passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
+    } finally { await context.close() }
+}
+
 async function mobileMediaMotionCase() {
     const { context, page, cdp, traffic } = await openCase({ width: 390 })
     let releasePreview
@@ -2331,6 +2368,7 @@ try {
         if (width < 500) {
             await mobileAlbumHeaderCase()
             await mobileScrollAndAutoplayCase()
+            await mobileToolbarLayoutCase()
             await mobileMediaMotionCase()
         } else {
             await routeCardMotionCase(width)

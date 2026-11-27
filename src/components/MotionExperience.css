@@ -219,6 +219,18 @@
   }
 }
 
+@supports (height: 100svh) {
+  @media (pointer: coarse) {
+    .linen-site .editorial-progress {
+      --editorial-progress-top: calc(74px + 0.5rem);
+      top: var(--editorial-progress-top);
+      right: env(safe-area-inset-right, 0px);
+      bottom: auto;
+      height: max(0px, calc(var(--linen-mobile-height) - var(--editorial-progress-top) - max(0.5rem, var(--linen-mobile-bottom-inset))));
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .linen-site .editorial-progress {
     display: none;
