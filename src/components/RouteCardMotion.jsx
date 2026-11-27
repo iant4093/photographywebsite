@@ -17,12 +17,12 @@ const clippedEasing = 'cubic-bezier(.38,.06,.24,1)'
 const floatingEasing = 'cubic-bezier(.26,.45,.25,1)'
 const openClip = 'inset(0px 0px 0px 0px)'
 
-function viewportRect(rect, clip, allowEdge = false) {
+function viewportRect(rect, clip, allowEdge = false, minWidth = allowEdge ? 12 : 32) {
     const left = Math.max(0, rect.left, clip?.left ?? 0)
     const top = Math.max(0, rect.top, clip?.top ?? 0)
     const right = Math.min(innerWidth, rect.right, clip?.right ?? innerWidth)
     const bottom = Math.min(innerHeight, rect.bottom, clip?.bottom ?? innerHeight)
-    return right - left >= (allowEdge ? 12 : 32) && bottom - top >= (allowEdge ? 12 : 28)
+    return right - left >= minWidth && bottom - top >= (allowEdge ? 12 : 28)
         ? { left, top, width: right - left, height: bottom - top } : null
 }
 
@@ -33,21 +33,26 @@ function titleClip(crop, preserveInk = false) {
     return `inset(${insets.join(' ')})`
 }
 
-function titleGeometry(element, frame) {
+function titleGeometry(element, frame, viewportClipped, rowBounds) {
     if (!element) return null
     const rect = element.getBoundingClientRect()
     const { left, top, width, height } = rect
     if (!width || !height) return null
     if (!frame && (left < 0 || top < 0 || left + width > innerWidth + 1 || top + height > innerHeight + 1)) return null
-    const cut = frame && [
+    const cut = frame && !viewportClipped && !rowBounds ? [
         Math.max(0, frame.top - top), Math.max(0, rect.right - frame.left - frame.width),
         Math.max(0, rect.bottom - frame.top - frame.height), Math.max(0, frame.left - left),
-    ]
+    ] : null
     if (cut && (width - cut[1] - cut[3] < 8 || height - cut[0] - cut[2] < 8)) return null
     const text = (element.dataset.title ?? element.textContent).trim().replace(/\s+/g, ' ')
     const crop = cut?.some(value => value > 1)
         ? cut.map((value, index) => value * 100 / (index % 2 ? width : height)) : undefined
-    return text ? { text, alias: element.dataset.routeTitleAlias, rect, crop } : null
+    // Start a fully hidden title just beyond the clipping edge so the movement is
+    // visible promptly, even when only the top of a tall card is on screen.
+    const edgeTop = viewportClipped ? Math.min(innerHeight + 12, Math.max(-height - 12, top)) : top
+    const edgeLeft = rowBounds ? Math.min(rowBounds.right + 12, Math.max(rowBounds.left - width - 12, left)) : left
+    const travelRect = edgeTop === top && edgeLeft === left ? rect : new DOMRect(edgeLeft, edgeTop, width, height)
+    return text ? { text, alias: element.dataset.routeTitleAlias, rect: travelRect, crop } : null
 }
 
 function readTitleStyle(pose) {
@@ -88,13 +93,14 @@ function geometry(rect) {
     return Object.fromEntries(['left', 'top', 'width', 'height'].map(name => [name, `${rect[name]}px`]))
 }
 
-function cardPose(card) {
+function cardPose(card, returning = false) {
     const rect = card.getBoundingClientRect()
     const boundary = card.closest('[data-scroll-row], .floating-lane, .photo-stats-timeline-scroll')
     const boundaryRect = boundary?.getBoundingClientRect()
     const marker = card.dataset.routeCard
     const album = albumCardMarkers.has(marker)
-    const frame = viewportRect(rect, boundaryRect, album)
+    const narrowRow = marker === 'timeline' || marker === 'floating'
+    const frame = viewportRect(rect, boundaryRect, album, narrowRow ? 1 : undefined)
     if (!frame) return null
     const clipped = rect.width - frame.width > 1 || rect.height - frame.height > 1
     // A thin crop is too small to provide a visible anchor for the heading.
@@ -104,16 +110,24 @@ function cardPose(card) {
         x: frame.left - rect.left > 1 ? -1 : rect.right - frame.width - frame.left > 1 ? 1 : 0,
         y: frame.top - rect.top > 1 ? -1 : rect.bottom - frame.height - frame.top > 1 ? 1 : 0,
     } : null
+    // The fixed morph layer already clips to the viewport. Keep this title
+    // intact so it stays aligned with the visible glyphs at the screen edge.
+    const edgeTitle = marker === 'album' || marker === 'floating' || (returning && marker === 'timeline')
+    const viewportTitle = edgeTitle && edge?.y && !edge.x
+        && (edge.y < 0 ? frame.top <= 1 : frame.top + frame.height >= innerHeight - 1)
     // A horizontal crop only needs the sides of the row. A moving title
     // crossing its top or bottom would otherwise lose its descenders.
-    const inlineClip = (marker === 'timeline' || marker === 'floating') && edge?.y === 0
+    const inlineClip = narrowRow && edge?.y === 0
     const clip = clipped && boundaryRect ? `inset(${[
         inlineClip ? 0 : boundaryRect.top, innerWidth - boundaryRect.right,
         inlineClip ? 0 : innerHeight - boundaryRect.bottom, boundaryRect.left,
     ].map(value => `${Math.max(0, value)}px`).join(' ')})` : openClip
     const inlineBounds = inlineClip && boundaryRect && { left: Math.max(0, boundaryRect.left), right: Math.min(innerWidth, boundaryRect.right) }
-    return { frame, clipped, clip, edge, inlineBounds, boundary, boundaryRect, preserveInk: marker === 'timeline' && inlineClip,
-        title: sliver ? null : titleGeometry(title, frame), element: title, card }
+    const rowTitle = inlineBounds && (marker === 'floating' || returning)
+    return { frame, clipped, clip, edge, inlineBounds, boundary, boundaryRect, viewportTitle, rowTitle,
+        preserveInk: marker === 'timeline' && inlineClip,
+        title: sliver && !viewportTitle && !rowTitle ? null : titleGeometry(title, frame, viewportTitle, rowTitle && inlineBounds),
+        element: title, card }
 }
 
 function headingPose(heading) {
@@ -137,7 +151,7 @@ function capture(card, location) {
     const phases = floatingPhases(card.closest('.floating-print-wall'))
     const current = touchMotion() ? null : readTitleStyle(cardPose(card))
     const pose = current && { frame: current.frame, clipped: current.clipped, clip: current.clip, edge: current.edge,
-        inlineBounds: current.inlineBounds, title: current.title }
+        inlineBounds: current.inlineBounds, viewportTitle: current.viewportTitle, rowTitle: current.rowTitle, title: current.title }
     return { from: location, marker: card.dataset.routeCard, path: cardPath(card), pose, phases,
         inMain: mainPage()?.contains(card), scrollY: window.scrollY,
         navbarVisible: navbar()?.hasAttribute('data-navbar-visible') }
@@ -149,7 +163,7 @@ function returnedCard(main, record) {
     let distance = Infinity
     const cards = `[data-route-card=${CSS.escape(record.marker)}]:is([href=${CSS.escape(record.path)}], [data-route-target=${CSS.escape(record.path)}])`
     for (const card of main.querySelectorAll(cards)) {
-        const pose = cardPose(card)
+        const pose = cardPose(card, true)
         if (!pose) continue
         const shift = Math.hypot(pose.frame.left - record.pose.frame.left, pose.frame.top - record.pose.frame.top)
         if (shift < distance) {
@@ -426,6 +440,10 @@ function animateEdgeTitle(titleWindow, label, heading, card, returning, travel, 
     return { motions: [...motions, handoff], handoff: handoff.finished }
 }
 
+function titleFitsRow(title, bounds) {
+    return bounds && title && title.rect.left >= bounds.left && title.rect.right <= bounds.right
+}
+
 function stageCard(main, from, returning, record) {
     const layer = document.createElement('div')
     layer.dataset.routeCardMorph = ''
@@ -437,10 +455,6 @@ function stageCard(main, from, returning, record) {
     const moduleReturn = returning && moduleCardMarkers.has(marker)
     const wasClipped = albumMorph && record.pose.clipped
     const isClipped = to => wasClipped || (albumMorph && to?.clipped)
-    // A card can extend past the bottom of the viewport with its whole title
-    // still on screen. The row's top edge must not cut into that title as it rises.
-    const clearBottomTitle = !returning && marker === 'album' && from.edge?.y === 1 && from.edge.x === 0
-        && from.title && !from.title.crop
     const outline = marker === 'section' || wasClipped || moduleReturn ? null : document.createElement('div')
     if (outline) {
         outline.className = 'route-card-outline'
@@ -449,7 +463,7 @@ function stageCard(main, from, returning, record) {
     }
     const titles = document.createElement('div')
     titles.className = 'route-card-title-window'
-    if (wasClipped && !returning && !clearBottomTitle) titles.style.clipPath = from.clip
+    if (wasClipped && !returning && !from.viewportTitle) titles.style.clipPath = from.clip
     layer.append(titles)
     let label = from.title ? titleLayer(titles, from.title) : null
     main.dataset.routePageStaged = ''
@@ -485,9 +499,11 @@ function stageCard(main, from, returning, record) {
             }
             previewHeading = heading
             const travel = { duration: 245, fill: 'both', easing: albumEasing }
-            const clipped = wasClipped && !clearBottomTitle
-            const { motions } = animateTitles(titles, label, from.title, landing, travel, null, true, clipped, false)
-            if (clipped) motions.push(titles.animate([{ clipPath: from.clip }, { clipPath: openClip }], travel))
+            const crop = wasClipped && !from.viewportTitle
+            const { motions } = animateTitles(titles, label, from.title, landing, travel, null, true, crop && !from.rowTitle, false)
+            if (crop && !(from.rowTitle && titleFitsRow(landing.title, from.inlineBounds))) {
+                motions.push(titles.animate([{ clipPath: from.clip }, { clipPath: openClip }], travel))
+            }
             animations.push(...motions)
             Promise.allSettled(motions.map(animation => animation.finished)).then(() => {
                 if (!layer.isConnected) return
@@ -521,11 +537,10 @@ function stageCard(main, from, returning, record) {
             const travel = { duration, fill: 'both', easing: floating ? floatingEasing : clipped ? clippedEasing : albumMorph ? albumEasing : easing }
             const matchingTitle = label && matchingTitles(departure.title, to?.title) && to.element
             const croppedCard = returning ? to : previewPose ? null : from
-            const bounds = floating && croppedCard?.inlineBounds
-            const headingBounds = (returning ? from : to)?.title?.rect
-            const fixedClip = bounds && headingBounds && headingBounds.left >= bounds.left && headingBounds.right <= bounds.right
+            const cropTitle = croppedCard?.clipped && !croppedCard.viewportTitle
+            const fixedClip = croppedCard?.rowTitle && titleFitsRow((returning ? from : to)?.title, croppedCard.inlineBounds)
             if (fixedClip) titles.style.clipPath = croppedCard.clip
-            else if (croppedCard?.clipped && !clearBottomTitle) {
+            else if (cropTitle) {
                 // Keep the letters inside the actual row while they leave or
                 // approach its edge. The glyph clip alone moves with the copy.
                 const crop = { clipPath: croppedCard.clip }
@@ -548,7 +563,7 @@ function stageCard(main, from, returning, record) {
                 resumeHover = holdCardHover(to.card)
                 const preserveInk = marker === 'timeline' && Boolean(croppedCard?.inlineBounds)
                 const title = animateTitles(titles, label, departure.title, to, travel, reveal, albumMorph || earlyReturn || moduleReturn,
-                    clipped && !fixedClip && !clearBottomTitle, preserveInk)
+                    cropTitle && !croppedCard.rowTitle, preserveInk)
                 animations.push(...title.motions)
                 handoff = title.handoff
             } else if (albumMorph && croppedCard?.edge && to) {
@@ -719,6 +734,7 @@ export default function RouteCardMotion() {
             let resumeTracks
             let stagedTitle
             let previousFrame
+            let sampledAfterTimeout = false
             let fontElement
             let titleFont
             let landingScroll
@@ -833,6 +849,13 @@ export default function RouteCardMotion() {
                 }
                 previousFrame = target
                 const expired = elapsed >= (target ? 650 : 420)
+                if (ready && expired && !stable && returning && to?.edge && !sampledAfterTimeout) {
+                    // Scroll restoration can paint the clipped card on the
+                    // deadline frame. Give its final title position one more sample.
+                    sampledAfterTimeout = true
+                    frame = requestAnimationFrame(step)
+                    return
+                }
                 if (ready && (stable || !from || expired)) {
                     // While the destination settles, measure only geometry. Match
                     // its typography once, at the exact pose used for the handoff.

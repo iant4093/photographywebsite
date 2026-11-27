@@ -1496,7 +1496,7 @@ async function wrappedAlbumTitleMotionCase(width) {
     } finally { await context.close() }
 }
 
-async function slowAlbumTitleMotionCase(width, type) {
+async function slowAlbumTitleMotionCase(width, type, viewportEdge = false) {
     const { context, page, cdp } = await openCase({ width })
     let releaseDetail, releaseCatalog
     try {
@@ -1520,6 +1520,14 @@ async function slowAlbumTitleMotionCase(width, type) {
         if (video) await page.goto(origin + catalogPath)
         const card = page.locator(`.catalog-section [data-route-card="album"][href="${detailPath}"]`)
         await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+        const edgeClick = viewportEdge && await card.evaluate(async element => {
+            const title = element.querySelector('h3')
+            scrollBy({ top: title.getBoundingClientRect().top - innerHeight - 80, behavior: 'instant' })
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            const tile = element.getBoundingClientRect()
+            return { x: tile.left + tile.width / 2, y: (tile.top + innerHeight) / 2,
+                hidden: title.getBoundingClientRect().top >= innerHeight + 40 }
+        })
         await page.evaluate(() => {
             const main = document.getElementById('main-content')
             window.__visitor.albumTitleMotions = {}
@@ -1544,7 +1552,10 @@ async function slowAlbumTitleMotionCase(width, type) {
             }).observe(main, { attributes: true, attributeFilter: ['data-route-page-motion'] })
         })
         const detailRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith(`/public/albums/${album.albumId}`))
-        await card.click()
+        if (edgeClick) {
+            assert.ok(edgeClick.hidden, 'The photo is clickable with its title entirely below the viewport')
+            await page.mouse.click(edgeClick.x, edgeClick.y)
+        } else await card.click()
         await page.waitForURL(origin + detailPath)
         await detailRequest
         const preview = page.locator('.route-card-preview h1:not([data-route-title-landing])')
@@ -1594,7 +1605,7 @@ async function slowAlbumTitleMotionCase(width, type) {
         await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
         assert.deepEqual(await page.evaluate(() => window.__visitor.albumTitleMotions), { enter: true, return: true })
         assert.equal(await page.locator('[data-route-title-landing], [data-route-card-morph]').count(), 0)
-        const result = { engine, width, check: `${type} album title travels after slow album and catalog responses`, passed: true }
+        const result = { engine, width, check: `${type} album title travels after slow album and catalog responses${viewportEdge ? ' from below the viewport' : ''}`, passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { releaseDetail?.(); releaseCatalog?.(); await context.close() }
 }
@@ -1934,23 +1945,33 @@ async function pageFadeCase(width) {
     } finally { await context.close() }
 }
 
-async function albumLowerEdgeOpeningCase(width) {
+async function albumLowerEdgeOpeningCase(width, partial = false) {
     const { context, page, cdp } = await openCase({ width })
     try {
         if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
         const card = page.locator('.catalog-section [data-route-card="album"]').first()
-        const position = await card.evaluate(link => {
+        const position = await card.evaluate(async (link, partial) => {
             const title = link.querySelector('h3')
-            scrollBy({ top: title.getBoundingClientRect().bottom - innerHeight + 22, behavior: 'instant' })
-            return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
-                const tile = link.getBoundingClientRect()
-                const text = title.getBoundingClientRect()
-                resolve({ cardBottom: tile.bottom, titleBottom: text.bottom, viewport: innerHeight,
-                    x: (tile.left + tile.right) / 2, y: (tile.top + Math.min(tile.bottom, innerHeight)) / 2 })
-            })))
-        })
-        assert.ok(position.cardBottom > position.viewport && position.titleBottom <= position.viewport
-            && position.titleBottom >= position.viewport - 65, `The title is visible immediately above a clipped card edge (${JSON.stringify(position)})`)
+            const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            await document.fonts.ready
+            link.scrollIntoView({ block: 'center', behavior: 'instant' })
+            await paint()
+            // Scroll-linked transforms can change the card position after the first update.
+            for (let i = 0; i < 5; i++) {
+                const rect = title.getBoundingClientRect()
+                const offset = rect.bottom - innerHeight + (partial ? -rect.height / 2 : 22)
+                if (Math.abs(offset) < 2) break
+                scrollBy({ top: offset, behavior: 'instant' })
+                await paint()
+            }
+            const tile = link.getBoundingClientRect()
+            const rect = title.getBoundingClientRect()
+            return { cardBottom: tile.bottom, titleTop: rect.top, titleBottom: rect.bottom, viewport: innerHeight,
+                x: (tile.left + tile.right) / 2, y: (tile.top + Math.min(tile.bottom, innerHeight)) / 2 }
+        }, partial)
+        assert.ok(position.cardBottom > position.viewport && position.titleTop < position.viewport
+            && (partial ? position.titleBottom > position.viewport : position.titleBottom <= position.viewport
+                && position.titleBottom >= position.viewport - 65), `The title is ${partial ? 'partly visible' : 'visible'} at the viewport edge (${JSON.stringify(position)})`)
         await card.evaluate(link => {
             const title = link.querySelector('h3')
             const main = link.closest('main')
@@ -1979,13 +2000,22 @@ async function albumLowerEdgeOpeningCase(width) {
         const moving = frames.find(frame => frame.mode === 'enter')
         assert.ok(prepared?.opacity === 1 && Math.abs(prepared.top - original) < 1, 'The title starts on the actual text at full opacity')
         assert.ok(moving.moves && frames.every(frame => frame.clip === 'none' && frame.windowClip === 'none'),
-            'The fully visible title travels independently of the cropped card')
-        const result = { engine, width, check: 'a visible album title near the lower viewport edge opens without a clipping flash', passed: true }
+            'The moving title uses only the viewport crop')
+        if (partial) {
+            await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
+            await page.goBack()
+            await page.waitForFunction(() => window.__visitor.lowerEdgeTitle.some(state => state.mode === 'return'))
+            const returning = await page.evaluate(() => window.__visitor.lowerEdgeTitle.find(state => state.mode === 'return'))
+            assert.ok(returning.moves && returning.clip === 'none' && returning.windowClip === 'none',
+                'The title moves back to the partially visible card with the same viewport crop')
+            await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
+        }
+        const result = { engine, width, check: `a ${partial ? 'partially clipped' : 'visible'} album title moves at the lower viewport edge without a clipping flash`, passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }
 
-async function routeCardClipCase(width, timeline = false) {
+async function routeCardClipCase(width, timeline = false, sliver = false) {
     const { context, page, cdp } = await openCase({ width, titleSuffix: timeline ? ' · Canopy study' : '' })
     try {
         if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
@@ -1998,57 +2028,71 @@ async function routeCardClipCase(width, timeline = false) {
         }
         await page.addStyleTag({ content: '[data-scroll-row], .photo-stats-timeline-scroll { scroll-snap-type: none !important }' })
         const cards = page.locator(timeline ? '[data-route-card="timeline"]' : '.catalog-section [data-route-card="album"]')
-        const index = timeline ? await cards.evaluateAll(elements => {
+        const index = timeline ? await cards.evaluateAll((elements, sliver) => {
             const row = elements[0].closest('.photo-stats-timeline-scroll')
             const left = row.getBoundingClientRect().left
             return elements.findIndex(card => {
                 const start = card.getBoundingClientRect().left - left + row.scrollLeft
-                return start >= 72 && start + 48 <= row.scrollWidth - row.clientWidth
+                return sliver ? start > row.clientWidth && start + 10 < row.scrollWidth
+                    : start >= 72 && start + 48 <= row.scrollWidth - row.clientWidth
             })
-        }) : 0
+        }, sliver) : 0
         assert.ok(index >= 0, 'A card can be positioned partly outside the row')
         const card = cards.nth(index)
-        const edge = await card.evaluate(async element => {
+        const edge = await card.evaluate(async (element, sliver) => {
             const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
             const row = element.closest('[data-scroll-row], .photo-stats-timeline-scroll')
             element.scrollIntoView({ block: 'center', behavior: 'instant' })
             await paint()
-            row.scrollLeft += element.getBoundingClientRect().left - row.getBoundingClientRect().left + 48
+            const rowRect = row.getBoundingClientRect()
+            row.scrollLeft += element.getBoundingClientRect().left - (sliver ? rowRect.right - 10 : rowRect.left - 48)
             await paint()
             const bounds = element.getBoundingClientRect()
-            const rowLeft = row.getBoundingClientRect().left
-            const x = (rowLeft + bounds.right) / 2
+            const { left, right } = row.getBoundingClientRect()
+            const x = sliver ? (bounds.left + right) / 2 : (left + bounds.right) / 2
             const y = bounds.top + bounds.height / 2
-            return { clipped: rowLeft - bounds.left, x, y, hit: element.contains(document.elementFromPoint(x, y)),
-                left: Math.max(0, rowLeft), gradient: getComputedStyle(row).maskImage }
-        })
+            return { clipped: sliver ? bounds.right - right : left - bounds.left, x, y, hit: element.contains(document.elementFromPoint(x, y)),
+                left: Math.max(0, left), right: Math.min(innerWidth, right), gradient: getComputedStyle(row).maskImage }
+        }, sliver)
         assert.ok(edge.clipped >= 40 && edge.hit, `The card is clickable and partly outside the row (${JSON.stringify(edge)})`)
         if (width < 500 && engine !== 'firefox') await page.touchscreen.tap(edge.x, edge.y)
         else await page.mouse.click(edge.x, edge.y)
         const title = page.locator('[data-route-card-morph] .route-card-title').first()
-        const masking = await title.evaluate(element => ({
-            clip: element.style.clipPath, gradient: getComputedStyle(element).maskImage,
-            offset: parseFloat(element.style.maskPosition), width: parseFloat(element.style.maskSize),
-        }))
-        assert.match(masking.clip, /^inset\(/, 'A partly visible card morphs its visible title crop')
-        if (!timeline) {
-            assert.equal(masking.gradient, edge.gradient, 'The title carries the same gradient as the carousel')
-            assert.ok(masking.offset > 0 && masking.width >= width - 80, 'The gradient aligns with the carousel edge')
+        if (!sliver) {
+            const masking = await title.evaluate(element => ({
+                clip: element.style.clipPath, gradient: getComputedStyle(element).maskImage,
+                offset: parseFloat(element.style.maskPosition), width: parseFloat(element.style.maskSize),
+            }))
+            assert.match(masking.clip, /^inset\(/, 'A partly visible card morphs its visible title crop')
+            if (!timeline) {
+                assert.equal(masking.gradient, edge.gradient, 'The title carries the same gradient as the carousel')
+                assert.ok(masking.offset > 0 && masking.width >= width - 80, 'The gradient aligns with the carousel edge')
+            }
         }
         await page.waitForURL('**/album/**')
         const entering = page.locator('main[data-route-page-motion="enter"]')
         await entering.waitFor({ state: 'attached' })
-        await assertClippedTitlePace(title, false, timeline)
+        if (!sliver) await assertClippedTitlePace(title, false, timeline)
         await assertTitleWindow(title, false, edge.left, timeline)
         assert.equal(await page.locator('.route-card-outline').count(), 0, 'A clipped title travels without an outline')
         await entering.waitFor({ state: 'detached' })
         await page.goBack()
         const returning = page.locator('main[data-route-page-motion="return"]')
         await returning.waitFor({ state: 'attached' })
-        await assertClippedTitlePace(title, true, timeline)
+        if (timeline) {
+            const landing = await page.locator('.route-card-title').last().evaluate(element => {
+                const animations = element.getAnimations().map(animation => animation.effect.getKeyframes())
+                const transform = animations.find(frames => frames[0].transform).at(-1).transform
+                return { x: new DOMMatrix(transform).e, crop: getComputedStyle(element).clipPath,
+                    landsOpaque: animations.some(frames => Number(frames[0].opacity) === 0 && Number(frames.at(-1).opacity) === 1) }
+            })
+            assert.equal(landing.crop, 'none', 'Only the timeline row crops the title on return')
+            assert.ok(landing.landsOpaque, 'The title keeps its opacity as the card disappears behind the row edge')
+            if (sliver) assert.ok(landing.x > edge.right - 18, `The title returns to the partly hidden card (${landing.x} vs ${edge.right})`)
+        } else await assertClippedTitlePace(title, true, timeline)
         await assertTitleWindow(title, true, edge.left, timeline)
         assert.equal(await page.locator('.route-card-outline').count(), 0, 'A clipped title returns without an outline')
-        const result = { engine, width, check: `partly visible ${timeline ? 'timeline' : 'carousel'} titles stay inside the row at the handoff`, passed: true }
+        const result = { engine, width, check: `${sliver ? 'nearly hidden' : 'partly visible'} ${timeline ? 'timeline' : 'carousel'} titles stay inside the row at the handoff`, passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }
@@ -2061,7 +2105,8 @@ function parseInsets(clip) {
 async function assertTitleWindow(title, returning, left, timeline) {
     const [first, second] = await title.evaluate((element, returning) => {
         const animation = element.parentElement.getAnimations().find(entry => entry.effect.getKeyframes()[0].clipPath)
-        const frames = animation.effect.getKeyframes()
+        const frames = animation?.effect.getKeyframes() ?? [{ clipPath: getComputedStyle(element.parentElement).clipPath },
+            { clipPath: getComputedStyle(element.parentElement).clipPath }]
         return (returning ? frames.slice(-2) : frames.slice(0, 2)).map(frame => frame.clipPath)
     }, returning)
     assert.equal(first, second, 'The clipping window stays fixed by the row during the handoff')
@@ -2144,8 +2189,10 @@ async function routeCardEdgeOnlyCase(width, horizontal = false) {
         assert.deepEqual(motions.map(motion => motion.mode), ['enter', 'return'])
         for (const motion of motions) {
             assert.ok(!motion.box && motion.moving && motion.duration >= 350, `The heading travels without an outline (${JSON.stringify(motion)})`)
-            const edge = horizontal ? motion.anchor[0] - position.x : motion.anchor[1] - position.y + position.visible / 2
-            assert.ok(Math.abs(edge) < 12, `The heading travels from the exposed edge (${edge}px away)`)
+            const edge = horizontal ? position.x : position.y + position.visible / 2
+            const offset = motion.anchor[horizontal ? 0 : 1] - edge
+            assert.ok(horizontal ? Math.abs(offset) < 12 : offset >= 0 && offset < 24,
+                `The heading travels ${horizontal ? 'from the carousel edge' : 'through the viewport edge'} (${offset}px away)`)
         }
         const final = await card.evaluate(element => [scrollY, element.closest('[data-scroll-row]').scrollLeft])
         assert.ok(Math.abs(final[0] - position.scroll) < 2 && Math.abs(final[1] - position.rowScroll) < 2, 'The gallery restores both scroll positions')
@@ -2192,6 +2239,15 @@ async function floatingEdgeCase(width) {
         const floatingMedia = morph.locator('img, canvas, svg, video, .route-card-photo-strip, .route-card-outline')
         await morph.waitFor({ state: 'attached' })
         assert.equal(await floatingMedia.count(), 0, 'The original carousel takes its covers with it during a cold departure')
+        await page.waitForFunction(() => document.querySelector('.route-card-preview')
+            && document.querySelector('.route-card-title')?.getAnimations().some(animation =>
+                animation.effect.getKeyframes()[0].transform))
+        const previewTitle = await morph.locator('.route-card-title').first().evaluate(element => ({
+            crop: getComputedStyle(element).clipPath, column: getComputedStyle(element.parentElement).clipPath,
+        }))
+        assert.equal(previewTitle.crop, 'none', 'The preview title travels without a second crop on the glyphs')
+        assert.ok(Math.abs(parseInsets(previewTitle.column).left - edge.left) < 1, 'The title emerges from the carousel lane')
+        await page.locator('.route-card-preview h1:not([data-route-title-landing])').waitFor()
         releaseAlbum()
         const entering = page.locator('main[data-route-page-motion="enter"]')
         await entering.waitFor({ state: 'attached' })
@@ -2201,7 +2257,7 @@ async function floatingEdgeCase(width) {
             const fade = document.querySelector('main').getAnimations()[0]
             return { travel: travel?.effect.getTiming().duration, revealDelay: fade.effect.getTiming().delay }
         })
-        assert.deepEqual(motion, { travel: 320, revealDelay: 90 })
+        assert.deepEqual(motion, { travel: 175, revealDelay: 175 })
         assert.equal(await floatingMedia.count(), 0, 'Only the title lifts from the carousel edge')
         await page.evaluate(() => { delete document.fonts.status })
         await entering.waitFor({ state: 'detached' })
@@ -2212,13 +2268,15 @@ async function floatingEdgeCase(width) {
         const heldTrack = page.locator('.floating-print-wall[data-route-card-hold] .floating-loop-track').first()
         assert.equal(await heldTrack.evaluate(track => getComputedStyle(track).animationPlayState), 'paused')
         assert.equal(await returning.evaluate(main => main.getAnimations()[0].effect.getTiming().duration), 400)
+        assert.equal(await morph.locator('.route-card-title').count(), 2, 'The title returns to its position on the moving card')
+        await assertTitleWindow(morph.locator('.route-card-title').first(), true, edge.left, true)
         await returning.waitFor({ state: 'detached' })
         await page.goForward()
         await morph.waitFor({ state: 'attached' })
         await entering.waitFor({ state: 'attached' })
-        assert.ok(await morph.locator('.route-card-title').evaluateAll(titles => titles.some(title =>
-            title.getAnimations().some(animation => 'transform' in animation.effect.getKeyframes()[0]))),
-        'A quick Forward replay still moves the title')
+        const forwardTravel = await morph.locator('.route-card-title').first().evaluate(title =>
+            title.getAnimations().find(animation => 'transform' in animation.effect.getKeyframes()[0])?.effect.getTiming().duration)
+        assert.equal(forwardTravel, 320, 'A quick Forward replay still moves the title')
         assert.equal(await floatingMedia.count(), 0, 'Forward leaves the cover with the carousel')
         await entering.waitFor({ state: 'detached' })
         const result = { engine, width, check: 'a clipped carousel cover leaves with the other cards, while the title moves on entry and Forward', passed: true }
@@ -2240,6 +2298,15 @@ try {
             await wrappedAlbumTitleMotionCase(width)
             await slowAlbumTitleMotionCase(width, 'photo')
             await slowAlbumTitleMotionCase(width, 'video')
+            await slowAlbumTitleMotionCase(width, 'photo', true)
+            await albumLowerEdgeOpeningCase(width)
+            await albumLowerEdgeOpeningCase(width, true)
+            await routeCardClipCase(width)
+            await routeCardClipCase(width, true)
+            await routeCardClipCase(width, true, true)
+            await routeCardEdgeOnlyCase(width)
+            await routeCardEdgeOnlyCase(width, true)
+            await floatingEdgeCase(width)
             continue
         }
         if (process.env.VISITOR_SHARE_HANDOFF_ONLY === '1') {
@@ -2268,9 +2335,12 @@ try {
             await wrappedAlbumTitleMotionCase(width)
             await slowAlbumTitleMotionCase(width, 'photo')
             await slowAlbumTitleMotionCase(width, 'video')
+            await slowAlbumTitleMotionCase(width, 'photo', true)
             await albumLowerEdgeOpeningCase(width)
+            await albumLowerEdgeOpeningCase(width, true)
             await routeCardClipCase(width)
             await routeCardClipCase(width, true)
+            await routeCardClipCase(width, true, true)
             await routeCardEdgeOnlyCase(width)
             await routeCardEdgeOnlyCase(width, true)
             await floatingEdgeCase(width)
