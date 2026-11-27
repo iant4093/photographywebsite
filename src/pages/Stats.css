@@ -588,7 +588,8 @@
 }
 
 .photo-stats-meter,
-.photo-stats-category-track {
+.photo-stats-category-track,
+.photo-stats-gear-track {
     overflow: hidden;
     background: var(--color-warm-border);
 }
@@ -599,7 +600,8 @@
 }
 
 .photo-stats-meter span,
-.photo-stats-category-track span {
+.photo-stats-category-track span,
+.photo-stats-gear-track span {
     display: block;
     height: 100%;
     background: var(--color-amber-dark);
@@ -700,9 +702,7 @@
 }
 
 .photo-stats-category-rank,
-.photo-stats-gear-rank,
-.photo-stats-category-copy > span:last-child,
-.photo-stats-gear-count {
+.photo-stats-category-copy > span:last-child {
     color: var(--color-warm-gray);
     font-size: 0.7rem;
 }
@@ -718,29 +718,78 @@
     margin: 0.8rem 0 0 2.8rem;
 }
 
-.photo-stats-gear-list h3 {
+.photo-stats-gear-grid {
+    align-items: start;
+}
+
+.photo-stats-gear-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
     padding: 1.25rem;
     border-bottom: 1px solid var(--color-charcoal);
+}
+
+.photo-stats-gear-heading h3 {
     font-family: var(--font-serif);
     font-size: 1.8rem;
     font-weight: 400;
+    line-height: 1;
 }
 
 .photo-stats-gear-list li {
     display: grid;
-    grid-template-columns: 2rem minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) max-content;
     align-items: baseline;
-    gap: 0.75rem;
-    padding: 1rem 1.25rem;
+    gap: 0.6rem 1rem;
+    padding: 0.85rem 1.25rem 1rem;
     border-bottom: 1px solid var(--color-warm-border);
+}
+
+.photo-stats-gear-list li:first-child {
+    padding-block: 1.05rem 1.15rem;
+    background: color-mix(in srgb, var(--color-amber) 7%, transparent);
 }
 
 .photo-stats-gear-list li:last-child {
     border-bottom: 0;
 }
 
-.photo-stats-gear-name {
+.photo-stats-gear-model {
+    min-width: 0;
     overflow-wrap: anywhere;
+    font-family: var(--font-serif);
+    font-size: clamp(1.14rem, 1.5vw, 1.42rem);
+    font-weight: 400;
+    line-height: 1.16;
+}
+
+.photo-stats-gear-count {
+    color: var(--color-warm-gray);
+    font-size: 0.86rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.photo-stats-gear-list li:first-child .photo-stats-gear-model {
+    font-size: clamp(1.45rem, 2.3vw, 2rem);
+}
+
+.photo-stats-gear-list li:first-child .photo-stats-gear-count {
+    color: var(--color-amber-dark);
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.photo-stats-gear-track {
+    grid-column: 1 / -1;
+    height: 0.19rem;
+}
+
+.photo-stats-gear-empty {
+    padding: 1.25rem;
+    color: var(--color-warm-gray);
+    font-size: 0.86rem;
 }
 
 .photo-stats-loading,
@@ -1084,8 +1133,6 @@ button.shooting-calendar-cell[aria-pressed="true"] {
     .photo-stats-category-copy { grid-template-columns: 1.7rem minmax(0, 1fr); }
     .photo-stats-category-copy > span:last-child { grid-column: 2; }
     .photo-stats-category-track { margin-left: 2.5rem; }
-    .photo-stats-gear-list li { grid-template-columns: 1.7rem minmax(0, 1fr); }
-    .photo-stats-gear-count { grid-column: 2; }
 }
 
 @media (prefers-reduced-motion: reduce) {

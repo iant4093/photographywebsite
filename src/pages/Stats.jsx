@@ -71,19 +71,39 @@ function SectionHeading({ id, title }) {
     )
 }
 
-function GearList({ title, items }) {
+function gearPhotoCount(value) {
+    const count = Number(value)
+    return Number.isFinite(count) ? Math.max(0, count) : 0
+}
+
+function GearList({ title, items, maximum, omitSeries = false }) {
+    const headingId = `gear-${title.toLowerCase()}`
     return (
-        <section className="photo-stats-gear-list" aria-labelledby={`gear-${title.toLowerCase()}`}>
-            <h3 id={`gear-${title.toLowerCase()}`}>{title}</h3>
-            <ol>
-                {items.map((item, index) => (
-                    <li key={item.name}>
-                        <span className="photo-stats-gear-rank">{String(index + 1).padStart(2, '0')}</span>
-                        <span className="photo-stats-gear-name">{item.name}</span>
-                        <span className="photo-stats-gear-count">{number(item.photos)} photos</span>
-                    </li>
-                ))}
-            </ol>
+        <section className="photo-stats-gear-list" aria-labelledby={headingId}>
+            <header className="photo-stats-gear-heading">
+                <h3 id={headingId}>{title}</h3>
+                {items.length > 0 && <span aria-hidden="true" className="photo-stats-eyebrow">Photos</span>}
+            </header>
+            {items.length === 0 ? <p className="photo-stats-gear-empty">No gear data yet.</p> : (
+                <ol role="list">
+                    {items.map(({ name, photos }) => {
+                        const label = String(name ?? '')
+                        const model = omitSeries ? label.split('|', 1)[0].trim() : label
+                        const count = gearPhotoCount(photos)
+                        return (
+                            <li key={name}>
+                                <strong className="photo-stats-gear-model">{model || 'Unknown model'}</strong>
+                                <span className="photo-stats-gear-count">
+                                    {number(count)}<span className="sr-only"> {count === 1 ? 'photo' : 'photos'}</span>
+                                </span>
+                                <div className="photo-stats-gear-track" aria-hidden="true">
+                                    <span style={{ width: `${(count / maximum) * 100}%` }} />
+                                </div>
+                            </li>
+                        )
+                    })}
+                </ol>
+            )}
         </section>
     )
 }
@@ -534,6 +554,9 @@ export default function Stats() {
         1,
         ...(report?.categories || []).map((category) => Number(category.photos || 0) + Number(category.videos || 0)),
     ), [report])
+    const cameras = report?.gear?.cameras || []
+    const lenses = report?.gear?.lenses || []
+    const gearMaximum = Math.max(1, ...[...cameras, ...lenses].map(({ photos }) => gearPhotoCount(photos)))
 
     return (
         <div className="photo-stats-page">
@@ -677,8 +700,8 @@ export default function Stats() {
                     <section className="photo-stats-motion-section" aria-labelledby="gear-heading">
                         <SectionHeading id="gear-heading" title="Gear" />
                         <div className="photo-stats-gear-grid">
-                            <GearList title="Cameras" items={report.gear?.cameras || []} />
-                            <GearList title="Lenses" items={report.gear?.lenses || []} />
+                            <GearList title="Cameras" items={cameras} maximum={gearMaximum} />
+                            <GearList title="Lenses" items={lenses} maximum={gearMaximum} omitSeries />
                         </div>
                     </section>
                 </div>

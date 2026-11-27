@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -38,6 +38,7 @@ const report = {
         cameras: [{ name: 'Canon EOS R7', photos: 2499 }],
         lenses: [
             { name: '17-40mm F1.8 DC | Art 025', photos: 1635 },
+            { name: '12mm F1.4 DC | Contemporary 025', photos: 543 },
             { name: 'Sirui Nightwalker 75mm T1.2', photos: 15 },
         ],
         manualLensFallback: 'Sirui Nightwalker 75mm T1.2',
@@ -253,8 +254,17 @@ describe('photography statistics page', () => {
         expect(screen.getByRole('columnheader', { name: 'Videos' })).toBeInTheDocument()
         expect(screen.queryByRole('columnheader', { name: /total published media/i })).toBeNull()
         expect(screen.getAllByText('Hikes')).toHaveLength(2)
-        expect(screen.getByText('Canon EOS R7')).toBeInTheDocument()
-        expect(screen.getByText('Sirui Nightwalker 75mm T1.2')).toBeInTheDocument()
+        const cameras = within(screen.getByRole('region', { name: 'Cameras' }))
+        const lenses = within(screen.getByRole('region', { name: 'Lenses' }))
+        expect(cameras.getByText('Canon EOS R7')).toBeInTheDocument()
+        expect(cameras.getByRole('listitem')).toHaveTextContent('2,499 photos')
+        expect(lenses.getByText('17-40mm F1.8 DC')).toBeInTheDocument()
+        expect(lenses.getByText('12mm F1.4 DC')).toBeInTheDocument()
+        expect(lenses.queryByText(/Art 025|Contemporary 025/)).not.toBeInTheDocument()
+        expect(lenses.getByText('Sirui Nightwalker 75mm T1.2')).toBeInTheDocument()
+        const usageWidth = item => parseFloat(item.querySelector('.photo-stats-gear-track span').style.width)
+        expect(usageWidth(cameras.getByRole('listitem'))).toBe(100)
+        expect(usageWidth(lenses.getAllByRole('listitem')[0])).toBeCloseTo(1635 / 2499 * 100)
         expect(screen.queryByText(/Image files in the raw archive/)).toBeNull()
         expect(screen.queryByText(/A living record of photographs/)).toBeNull()
         expect(screen.queryByText(/Field notes · The numbers behind the photographs/)).toBeNull()
