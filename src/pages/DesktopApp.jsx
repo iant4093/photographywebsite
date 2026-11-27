@@ -1,5 +1,4 @@
 import { Link } from 'react-router'
-import { APP_MODULES } from '../utils/appModules'
 import './Explore.css'
 import './Apps.css'
 import './TruongCam.css'
@@ -213,12 +212,11 @@ export default function DesktopApp({ moduleId }) {
     const app = APPS[moduleId]
     const repository = `https://github.com/iant4093/${app.title}`
     const assets = `/apps/${moduleId}`
-    const comingSoon = APP_MODULES.find(module => module.id === moduleId)?.comingSoon
     const platform = getPlatform(navigator)
-    const download = !comingSoon && app.downloads.find(option => option.platform === platform)
+    const download = app.downloads.find(option => option.platform === platform)
     const downloadUrl = file => `${repository}/releases/latest/download/${file}`
     const [heroFile, heroCaption, heroAlt] = app.hero
-    const availability = comingSoon ? `Coming soon for ${app.platforms}.` : platform === 'mobile'
+    const availability = platform === 'mobile'
         ? `Visit this page on ${app.platforms === 'Mac' ? 'your Mac' : 'your Mac or Windows computer'} to download.`
         : `Available for ${app.platforms}.`
 
@@ -235,10 +233,10 @@ export default function DesktopApp({ moduleId }) {
                             {download && <a className="cam-button cam-button-primary" href={downloadUrl(download.file)}>Download for {download.label} <span aria-hidden="true">↓</span></a>}
                             <a className="cam-button" href={repository} target="_blank" rel="noreferrer">View on GitHub <span aria-hidden="true">↗</span></a>
                         </div>
-                        {!comingSoon && <p className="cam-install-note">
+                        <p className="cam-install-note">
                             {download && <>{download.requirement} · </>}
                             <a href="#installation">How to install</a>
-                        </p>}
+                        </p>
                     </div>
                     <figure className="cam-hero-visual">
                         <img className="desktop-app-hero-image" src={`${assets}/${heroFile}.webp`} alt={heroAlt} width={app.screenshotSize[0]} height={app.screenshotSize[1]} fetchPriority="high" />
@@ -261,7 +259,7 @@ export default function DesktopApp({ moduleId }) {
                     </div>
                     <p className="desktop-app-note">{app.screenshotNote} {app.screenshotRevision && <a href={`${repository}/blob/${app.screenshotRevision}/README.md#screenshots`} target="_blank" rel="noreferrer">Screenshot details ↗</a>}</p>
                 </section>
-                {!comingSoon && <section id="installation" className="cam-install" aria-labelledby="app-install-title">
+                <section id="installation" className="cam-install" aria-labelledby="app-install-title">
                     <h2 id="app-install-title">Installation</h2>
                     <div className="desktop-app-instructions">
                         {app.downloads.map(option => (
@@ -277,7 +275,7 @@ export default function DesktopApp({ moduleId }) {
                         <p className="desktop-app-note">{app.setup}</p>
                         <a className="cam-guide" href={`${repository}#install`} target="_blank" rel="noreferrer">Full installation guide ↗</a>
                     </div>
-                </section>}
+                </section>
             </div>
         </div>
     )

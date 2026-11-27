@@ -49,7 +49,6 @@ export const APP_MODULES = Object.freeze([
         title: 'TruongSync',
         detail: 'Import camera cards, geotag photos, and back up shoots to Google Drive or an external drive.',
         summary: 'Photo import, geotagging, and backup',
-        comingSoon: true,
     },
     {
         id: 'truongstream',
