@@ -171,7 +171,7 @@ function AlbumCard({
                     {album.title}
                 </h3>
                 {album.description && (
-                    <p data-route-description="" className="mt-1 text-sm text-warm-gray line-clamp-2">
+                    <p className="mt-1 text-sm text-warm-gray line-clamp-2">
                         {album.description}
                     </p>
                 )}

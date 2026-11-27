@@ -52,36 +52,6 @@ main[data-route-page-staged]:not([data-route-page-revealing]) .skeleton-shimmer 
     .route-card-preview[data-route-card-video] { padding-top: 9.875rem; }
 }
 
-.route-card-progress {
-    height: 2px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--color-warm-border) 58%, transparent);
-}
-
-.route-card-preview-details,
-[data-route-card-morph] > .route-card-progress {
-    animation: route-card-progress-appear 180ms ease-out 180ms both;
-}
-
-[data-route-card-morph] > .route-card-progress {
-    position: absolute;
-    inset: auto 0 max(1.5rem, env(safe-area-inset-bottom));
-    width: 8rem;
-    margin-inline: auto;
-}
-
-.route-card-progress::after {
-    display: block;
-    width: 24%;
-    height: 100%;
-    background: var(--color-amber-dark);
-    content: '';
-    animation: route-card-progress-travel 1400ms ease-in-out infinite;
-}
-
-@keyframes route-card-progress-appear { from { opacity: 0; } to { opacity: 1; } }
-@keyframes route-card-progress-travel { from { transform: translateX(-100%); } to { transform: translateX(420%); } }
-
 .route-page-touch-fade {
     position: fixed;
     inset: 0;

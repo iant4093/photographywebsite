@@ -52,6 +52,8 @@ describe('continuous pulling past the footer', () => {
         expect(onProgress.mock.calls.at(-1)[0]).toBeGreaterThan(0.2)
         expect(onTrigger).not.toHaveBeenCalled()
         pullWheel(2, { deltaY: 60 })
+        expect(onTrigger).not.toHaveBeenCalled()
+        pullWheel(2, { deltaY: 60 })
         expect(onAttempt).toHaveBeenCalledTimes(1)
         expect(onTrigger).toHaveBeenCalledTimes(1)
         pullWheel(40)
@@ -59,12 +61,12 @@ describe('continuous pulling past the footer', () => {
     })
     it('moves the footer immediately while retaining the activation time guard', () => {
         wheel({ deltaY: 60 })
-        expect(onProgress).toHaveBeenLastCalledWith(0.3)
+        expect(onProgress).toHaveBeenLastCalledWith(0.2)
         expect(onTrigger).not.toHaveBeenCalled()
         advance(1100)
         startTouch()
         advance(30)
-        moveTouch(550)
+        moveTouch(520)
         expect(onProgress).toHaveBeenLastCalledWith(1)
         expect(onTrigger).not.toHaveBeenCalled()
     })
@@ -87,8 +89,24 @@ describe('continuous pulling past the footer', () => {
         pullWheel(24)
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
-    it('accepts the natural rise and taper of one modest trackpad pull', () => {
+    it('keeps a short trackpad flick from activating Misty', () => {
         for (const deltaY of [5, 10, 18, 27, 35, 32, 28, 24, 18, 12, 8, 4]) {
+            wheel({ deltaY }); advance(16)
+        }
+        expect(onTrigger).not.toHaveBeenCalled()
+        advance(600)
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+    })
+    it('waits for a sustained pull even when a fast burst covers the distance', () => {
+        pullWheel(4)
+        expect(onProgress).toHaveBeenLastCalledWith(1)
+        expect(onTrigger).not.toHaveBeenCalled()
+        advance(600)
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+        expect(onTrigger).not.toHaveBeenCalled()
+    })
+    it('accepts the natural rise and taper of a deliberate trackpad pull', () => {
+        for (const deltaY of [5, 10, 18, 27, 35, 40, 40, 38, 32, 29, 26, 22, 18, 12, 8, 4]) {
             wheel({ deltaY }); advance(16)
         }
         expect(onTrigger).toHaveBeenCalledTimes(1)
@@ -100,13 +118,13 @@ describe('continuous pulling past the footer', () => {
     })
     it('preserves partial progress across a brief pause and tiny reverse jitter', () => {
         for (const deltaY of [10, 20, 30, 35]) { wheel({ deltaY }); advance(16) }
-        wheel({ deltaY: -1 }); advance(600)
-        for (const deltaY of [8, 16, 25, 30, 32]) { wheel({ deltaY }); advance(16) }
+        wheel({ deltaY: -1 }); advance(260)
+        for (const deltaY of [8, 16, 25, 30, 32, 38, 42, 36]) { wheel({ deltaY }); advance(16) }
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
     it('releases pressure after a real pause or reversing direction', () => {
         pullWheel(2, { deltaY: 50 })
-        advance(1100)
+        advance(600)
         expect(onProgress).toHaveBeenLastCalledWith(0)
         pullWheel(2, { deltaY: 50 })
         expect(onTrigger).not.toHaveBeenCalled()
@@ -167,9 +185,11 @@ describe('continuous pulling past the footer', () => {
         endTouch()
         expect(onProgress).toHaveBeenLastCalledWith(0)
     })
-    it('accepts a short comfortable finger pull without a long hold', () => {
+    it('requires a longer touch pull and activates without waiting for release', () => {
         startTouch()
         for (const y of [630, 610, 590, 570]) { advance(30); moveTouch(y) }
+        expect(onTrigger).not.toHaveBeenCalled()
+        for (const y of [550, 530]) { advance(30); moveTouch(y) }
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
     it('allows a touch drag to reach the footer and keep pulling in the same gesture', () => {
@@ -228,7 +248,7 @@ describe('continuous pulling past the footer', () => {
         pullWheel(4)
         expect(onTrigger).not.toHaveBeenCalled()
         advance(1000)
-        pullWheel(4)
+        pullWheel(7)
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
     it.each(['busy', 'spinner', 'skeleton'])('blocks a temporary loading footer for as long as content is pending: %s', indicator => {
@@ -244,7 +264,7 @@ describe('continuous pulling past the footer', () => {
         pullWheel(30)
         expect(onTrigger).not.toHaveBeenCalled()
         advance(300)
-        pullWheel(4)
+        pullWheel(7)
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
     it('cancels a partial pull and pending previews when the page grows, then requires a fresh pull', () => {
@@ -257,7 +277,7 @@ describe('continuous pulling past the footer', () => {
         pullWheel(30)
         expect(onTrigger).not.toHaveBeenCalled()
         advance(300)
-        pullWheel(4)
+        pullWheel(7)
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
     it('ignores a touch drag begun while content is loading even if it finishes mid-drag', () => {

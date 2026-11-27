@@ -1,9 +1,9 @@
 const BOTTOM_GRACE_MS = 160
-const RELEASE_MS = 1000
-const WHEEL_PULL_PX = 200
-const WHEEL_PULL_MS = 80
-const TOUCH_PULL_PX = 80
-const TOUCH_PULL_MS = 80
+const RELEASE_MS = 550
+const WHEEL_PULL_PX = 300
+const WHEEL_PULL_MS = 220
+const TOUCH_PULL_PX = 120
+const TOUCH_PULL_MS = 180
 const LAYOUT_SETTLE_MS = 750
 const LOADING_CONTENT = '[aria-busy="true"], .animate-spin, .skeleton-shimmer'
 const INTERACTIVE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="listbox"], [role="dialog"], [aria-modal="true"]'

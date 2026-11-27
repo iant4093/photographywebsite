@@ -140,7 +140,6 @@ function capture(card, location) {
         inlineBounds: current.inlineBounds, title: current.title }
     return { from: location, marker: card.dataset.routeCard, path: cardPath(card), pose, phases,
         inMain: mainPage()?.contains(card), scrollY: window.scrollY,
-        description: current?.title && card.querySelector('[data-route-description]')?.textContent,
         navbarVisible: navbar()?.hasAttribute('data-navbar-visible') }
 }
 
@@ -204,7 +203,8 @@ const clippedReturnReveal = { ...returnReveal, duration: 455 }
 const floatingEntryReveal = { ...clippedEntryReveal, delay: 90 }
 const floatingReturnReveal = { ...clippedReturnReveal, duration: 400 }
 const routeReveal = { duration: 390, fill: 'backwards', easing: 'ease-in-out' }
-const previewReveal = { ...stagedReveal, delay: 0, duration: 320 }
+const previewLandingMs = 175
+const previewReveal = { ...stagedReveal, delay: previewLandingMs, duration: 320 }
 
 function holdNavbarForReturn(visible) {
     const nav = navbar()
@@ -460,21 +460,13 @@ function stageCard(main, from, returning, record) {
     if (outline && !returning) animations.push(outline.animate([{ opacity: .36 }, { opacity: 0 }], edgeTiming))
     let resumeHover
     let interactiveTimer
-    let progress
-    let loadingDetails
     let previewHeading
     let previewPose
     return {
         get previewMoving() { return Boolean(previewHeading && !previewPose) },
         get hasPreview() { return Boolean(previewPose) },
-        showLoading() {
-            if (progress) return
-            progress = document.createElement('div')
-            progress.className = 'route-card-progress'
-            if (returning || !label) {
-                layer.prepend(progress)
-                return
-            }
+        showPreview() {
+            if (previewHeading || !label) return
             // Start the flight into an album header while the route still loads.
             // Keep its landing separate from the real heading until that exists.
             const preview = document.createElement('div')
@@ -484,25 +476,14 @@ function stageCard(main, from, returning, record) {
             heading.className = 'font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit'
             heading.textContent = from.title.text
             heading.dataset.routeTitleLanding = ''
-            const details = document.createElement('div')
-            details.className = 'route-card-preview-details'
-            if (record.description) {
-                const description = document.createElement('p')
-                description.className = 'text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap line-clamp-2 mb-4'
-                description.textContent = record.description
-                details.append(description)
-            }
-            details.append(progress)
-            preview.append(heading, details)
+            preview.append(heading)
             layer.prepend(preview)
             const landing = readTitleStyle(headingPose(heading))
             if (!landing?.title) {
-                layer.prepend(progress)
                 preview.remove()
                 return
             }
             previewHeading = heading
-            loadingDetails = details
             const travel = { duration: 245, fill: 'both', easing: albumEasing }
             const clipped = wasClipped && !clearBottomTitle
             const { motions } = animateTitles(titles, label, from.title, landing, travel, null, true, clipped, false)
@@ -533,12 +514,9 @@ function stageCard(main, from, returning, record) {
                 previewHeading.dataset.routeTitleLanding = ''
                 outline?.remove()
             }
-            const retiring = loadingDetails || progress
-            if (retiring) animations.push(retiring.animate([{ opacity: Number(getComputedStyle(retiring).opacity) }, { opacity: 0 }],
-                loadingDetails ? reveal : { duration: 150, fill: 'forwards', easing: 'ease-out' }))
             const clipped = !previewPose && isClipped(to)
             const floating = clipped && marker === 'floating'
-            const duration = previewPose ? 175 : floating ? floatingTravelMs : clipped ? clippedTravelMs
+            const duration = previewPose ? previewLandingMs : floating ? floatingTravelMs : clipped ? clippedTravelMs
                 : earlyReturn ? cardReturnTravelMs : albumMorph ? albumCardTravelMs : cardTravelMs
             const travel = { duration, fill: 'both', easing: floating ? floatingEasing : clipped ? clippedEasing : albumMorph ? albumEasing : easing }
             const matchingTitle = label && matchingTitles(departure.title, to?.title) && to.element
@@ -813,8 +791,8 @@ export default function RouteCardMotion() {
                     : null
                 if (waitForAlbum && !to && (page?.hasAttribute('data-route-loading') || (committed && page?.getAttribute('aria-busy') === 'true'))) {
                     if (!loadingObserver) {
-                        // Loading is separate from settling the destination geometry.
-                        loadingTimer = window.setTimeout(() => stage.showLoading(), returning ? 650 : 180)
+                        // Let the title reach the header during a slow open.
+                        if (!returning) loadingTimer = window.setTimeout(stage.showPreview, 180)
                         loadingObserver = new MutationObserver(step)
                         loadingObserver.observe(main, { childList: true, subtree: true, attributes: true,
                             attributeFilter: ['aria-busy', 'data-route-content', 'data-route-loading'] })
