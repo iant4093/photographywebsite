@@ -90,8 +90,8 @@ await generation.close()
 const images = Object.fromEntries(Object.entries(encoded).map(([width, bytes]) => [width, Buffer.from(bytes)]))
 fixtureDownload = images[1920]
 
-async function openCase({ width, count = 85, baseline = false, moduleDelay = 0, failModule = false, imageDelay = 0, detailDelay = 0, titleSuffix = '', albumPreview = false }) {
-    const context = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: width < 500 ? 3 : 1,
+async function openCase({ width, height = 900, count = 85, baseline = false, moduleDelay = 0, failModule = false, imageDelay = 0, detailDelay = 0, titleSuffix = '', albumPreview = false }) {
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: width < 500 ? 3 : 1,
         ...(engine !== 'firefox' ? { isMobile: width < 500, hasTouch: width < 500 } : {}), serviceWorkers: 'block' })
     const data = fixture(count), traffic = [], errors = []
     if (titleSuffix) data.items.forEach(album => { album.title += titleSuffix })
@@ -984,36 +984,49 @@ async function mobileScrollAndAutoplayCase() {
 async function mobileToolbarLayoutCase() {
     const width = 390
     const expandedHeight = 790
-    const { context, page, cdp } = await openCase({ width })
+    const { context, page, cdp } = await openCase({ width, height: expandedHeight })
     try {
         if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
-        await page.setViewportSize({ width, height: expandedHeight })
-        await page.addStyleTag({ content: 'html { overflow-anchor: none } .linen-back-to-top { animation: none; transition: none }' })
-        await page.evaluate(() => scrollTo({ top: 1100, behavior: 'instant' }))
+        await page.addStyleTag({ content: '.linen-back-to-top { animation: none; transition: none }' })
+        const card = page.locator('.catalog-section .album-card').first()
+        await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
         const button = page.locator('.linen-back-to-top')
         const rail = page.getByRole('scrollbar', { name: 'Page scroll position' })
         await button.waitFor()
         await rail.waitFor()
-        const positions = () => button.evaluate(element => {
-            const button = element.getBoundingClientRect()
-            const rail = document.querySelector('.editorial-progress').getBoundingClientRect()
-            return [button.top, button.bottom, rail.top, rail.bottom]
+        const positions = () => card.evaluate(element => {
+            const box = node => {
+                const { top, bottom, height, width } = node.getBoundingClientRect()
+                return { top, bottom, height, width }
+            }
+            return {
+                cover: box(document.querySelector('.linen-hero')),
+                heading: box(document.getElementById('photo-albums')),
+                card: box(element),
+                button: box(document.querySelector('.linen-back-to-top')),
+                rail: box(document.querySelector('.editorial-progress')),
+                scroll: { top: scrollY, height: document.documentElement.scrollHeight },
+            }
         })
+        const paint = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        await paint()
         const before = await positions()
-        assert.ok(before.every(y => y >= 0 && y < expandedHeight), 'Both controls fit above the expanded toolbar')
-        // Playwright resizes the entire viewport, including svh. A phone
-        // toolbar only changes the current viewport, so hold its small height.
-        await page.addStyleTag({ content: `.linen-site { --linen-mobile-height: ${expandedHeight}px }` })
+        assert.ok(before.button.bottom < expandedHeight && before.rail.bottom < expandedHeight,
+            'Both controls fit above the expanded toolbar')
         for (const height of [900, expandedHeight]) {
             await page.setViewportSize({ width, height })
-            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+            await paint()
             const current = await positions()
-            assert.ok(current.every((y, index) => Math.abs(y - before[index]) < 1),
-                `The button and rail hold their positions while the toolbar changes (${before} vs ${current})`)
+            for (const [name, geometry] of Object.entries(before)) {
+                assert.ok(Object.keys(geometry).every(key => Math.abs(geometry[key] - current[name][key]) < 1),
+                    `${name} holds steady during a height change (${JSON.stringify(geometry)} vs ${JSON.stringify(current[name])})`)
+            }
         }
         await button.tap()
         await page.waitForFunction(() => scrollY < 1)
-        const result = { engine, width, check: 'mobile browser toolbar changes leave the scroll controls steady', passed: true }
+        await page.setViewportSize({ width: 430, height: 840 })
+        await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--linen-viewport-small-height') === '840px')
+        const result = { engine, width, check: 'mobile viewport height changes leave the catalog layout and controls steady', passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }

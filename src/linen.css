@@ -41,8 +41,13 @@
   @media (pointer: coarse) {
     .linen-site {
       /* Keep floating controls above the expanded browser toolbar. */
-      --linen-mobile-height: 100svh;
+      --linen-mobile-height: var(--linen-viewport-small-height, 100svh);
       --linen-mobile-bottom-inset: env(safe-area-max-inset-bottom, 0px);
+    }
+
+    .linen-site:not(.linen-admin, .linen-immersive),
+    .linen-site:not(.linen-admin, .linen-immersive) > main > .min-h-screen {
+      min-height: var(--linen-viewport-large-height, 100vh);
     }
 
     .linen-site .linen-back-to-top {
@@ -306,7 +311,7 @@
 .linen-site .linen-hero,
 .linen-site .linen-video-hero {
   /* Keep the gallery covers the same height at each breakpoint. */
-  --portfolio-hero-height: clamp(37rem, 92svh, 780px);
+  --portfolio-hero-height: clamp(37rem, calc(var(--linen-mobile-height, 100svh) * 0.92), 780px);
   min-height: var(--portfolio-hero-height);
   margin: calc(74px + 0.8rem) 0.8rem 0.8rem;
   border: 1px solid var(--color-charcoal);
@@ -324,7 +329,7 @@
   .linen-site .linen-hero,
   .linen-site .linen-video-hero {
     /* Grow with wide monitors so a 3:2 cover is not cut to a thin band. */
-    --portfolio-hero-height: clamp(46.5rem, 92svh, max(780px, 46vw));
+    --portfolio-hero-height: clamp(46.5rem, calc(var(--linen-mobile-height, 100svh) * 0.92), max(780px, 46vw));
   }
 }
 
@@ -342,7 +347,7 @@
   min-height: var(--portfolio-hero-height);
   display: flex;
   align-items: flex-start;
-  padding-top: clamp(9rem, 26svh, 14rem);
+  padding-top: clamp(9rem, calc(var(--linen-mobile-height, 100svh) * 0.26), 14rem);
   padding-bottom: clamp(3rem, 8vw, 7rem);
 }
 
@@ -351,7 +356,7 @@
 }
 
 .linen-site .linen-hero-actions {
-  margin-top: clamp(4rem, 10svh, 6rem);
+  margin-top: clamp(4rem, calc(var(--linen-mobile-height, 100svh) * 0.10), 6rem);
 }
 
 .linen-site .linen-kicker,

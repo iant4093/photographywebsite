@@ -13,6 +13,7 @@ import AlbumLoadingSkeleton from './components/AlbumLoadingSkeleton'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 import { usesAdminChrome } from './utils/adminRoutes'
+import useStableMobileViewport from './hooks/useStableMobileViewport'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const ProtectedRoute = lazy(() => import('./components/ProtectedRoute'))
@@ -79,6 +80,7 @@ function PageLoading() {
 
 function App() {
     const location = useLocation()
+    useStableMobileViewport()
     const isAdminRoute = usesAdminChrome(location.pathname)
     const isImmersiveRoute = location.pathname === '/explore/immersive-gallery' || location.pathname === '/tv'
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)

@@ -203,7 +203,8 @@ export default function MotionExperience() {
         // the toolbar cannot shift every card at once.
         const viewportProbe = document.createElement('div')
         viewportProbe.setAttribute('aria-hidden', 'true')
-        viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none'
+        viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;visibility:hidden;pointer-events:none'
+        viewportProbe.style.height = touchViewport ? 'var(--linen-viewport-large-height, 100lvh)' : '100lvh'
         document.body.append(viewportProbe)
 
         const requestUpdate = () => {
