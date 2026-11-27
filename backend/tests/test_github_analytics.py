@@ -63,7 +63,7 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
     def test_repository_selection_is_allowlisted_and_scopes_cache_reads(self):
         self.assertEqual(set(github_analytics.REPOSITORIES), {
             "photographywebsite", "TruongCam", "TruongNoiser", "TruongScaler",
-            "TruongFlix", "TruongCleaner", "TruongPaper", "TruongStream",
+            "TruongFlix", "TruongCleaner", "TruongPaper", "TruongStream", "TruongPhoto", "TruongSync",
         })
         for repository in github_analytics.REPOSITORIES:
             event = {**ADMIN_EVENT, "queryStringParameters": {"repo": repository}}
@@ -87,6 +87,8 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         snapshots = {
             "photographywebsite": {**sample_report(), "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat()},
             "TruongFlix": {**sample_report(), "generatedAt": "2000-01-01T00:00:00Z"},
+            "TruongPhoto": {**sample_report(), "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat()},
+            "TruongSync": {**sample_report(), "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat()},
         }
         event = {**ADMIN_EVENT, "queryStringParameters": {"repo": "all"}}
         with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
@@ -101,7 +103,7 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         self.assertEqual([repo["name"] for repo in body["repositories"]], list(github_analytics.REPOSITORIES))
         self.assertEqual(body["cacheStatus"], "partial")
         self.assertEqual({name: report["cacheStatus"] for name, report in body["reports"].items()}, {
-            "photographywebsite": "fresh", "TruongFlix": "stale",
+            "photographywebsite": "fresh", "TruongFlix": "stale", "TruongPhoto": "fresh", "TruongSync": "fresh",
         })
         self.assertNotIn("cacheStatus", snapshots["TruongFlix"])
         self.assertEqual(cache.call_args_list, [call(repo) for repo in github_analytics.REPOSITORIES])
@@ -126,6 +128,14 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
             response = get_github_analytics.handler(ADMIN_EVENT, CONTEXT)
         self.assertEqual(response_body(response)["code"], "github_analytics_unavailable")
         self.assertNotIn("secret", response["body"] + " ".join(logs.output))
+
+
+    def test_next_refresh_matches_the_selected_repository_batch(self):
+        current = dt.datetime(2026, 11, 26, 11, 20, tzinfo=dt.timezone.utc)
+        with patch.object(get_github_analytics, "refresh_slot", return_value=current):
+            self.assertEqual(get_github_analytics._next_refresh("all"), "2026-11-26T12:20:00Z")
+            self.assertEqual(get_github_analytics._next_refresh("photographywebsite"), "2026-11-26T12:20:00Z")
+            self.assertEqual(get_github_analytics._next_refresh("TruongSync"), "2026-11-26T13:20:00Z")
 
 
 class GitHubAnalyticsCollectorTests(unittest.TestCase):
@@ -208,26 +218,51 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
             ), self.assertRaises(github_analytics.ProviderContractError):
                 github_analytics._count_archive(sha, "TruongScaler")
 
-    def test_refresh_requires_the_exact_trusted_event(self):
-        with patch.object(refresh_github_analytics, "load_cached_report", return_value=sample_report()), patch.object(
-            refresh_github_analytics, "build_report", return_value=sample_report()
-        ) as build, patch.object(refresh_github_analytics, "store_report") as store:
-            result = refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
-        self.assertTrue(result["refreshed"])
-        self.assertEqual(build.call_count, len(github_analytics.REPOSITORIES))
-        self.assertEqual(store.call_count, len(github_analytics.REPOSITORIES))
-        self.assertEqual(result["repositories"], list(github_analytics.REPOSITORIES))
+    def test_refresh_requires_the_exact_trusted_event_and_covers_both_batches(self):
+        refreshed = []
+        for hour in (10, 11):
+            slot = dt.datetime(2026, 11, 26, hour, 20, tzinfo=dt.timezone.utc)
+            with patch.object(refresh_github_analytics, "refresh_slot", return_value=slot), patch.object(
+                refresh_github_analytics, "load_cached_report", return_value=sample_report()
+            ), patch.object(refresh_github_analytics, "build_report", return_value=sample_report()) as build, patch.object(
+                refresh_github_analytics, "store_report"
+            ) as store:
+                result = refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
+            self.assertTrue(result["refreshed"])
+            self.assertEqual(build.call_count, store.call_count)
+            self.assertLessEqual(build.call_count * 8, 60)
+            self.assertIn("photographywebsite", result["repositories"])
+            refreshed.extend(result["repositories"])
+        self.assertCountEqual(refreshed, [*github_analytics.REPOSITORIES, "photographywebsite"])
         with self.assertRaises(ValueError):
             refresh_github_analytics.handler({"source": "untrusted"}, CONTEXT)
 
+    def test_initial_snapshots_can_refresh_outside_their_batch(self):
+        slot = dt.datetime(2026, 11, 26, 10, 20, tzinfo=dt.timezone.utc)
+        new_repos = ["TruongPhoto", "TruongSync"]
+        current = {**sample_report(), "generatedAt": "2026-11-26T10:23:00Z"}
+        with patch.object(refresh_github_analytics, "refresh_slot", return_value=slot), patch.object(
+            refresh_github_analytics, "load_cached_report", side_effect=lambda repo: None if repo in new_repos else current
+        ), patch.object(
+            refresh_github_analytics, "build_report", return_value=current
+        ) as build, patch.object(refresh_github_analytics, "store_report") as store:
+            result = refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
+        self.assertEqual(result["repositories"], new_repos)
+        self.assertEqual(build.call_args_list, [call(None, repository=repo) for repo in new_repos])
+        self.assertEqual(store.call_args_list, [call(current, repo) for repo in new_repos])
+
     def test_failed_repository_preserves_cache_and_does_not_block_other_refreshes(self):
-        remaining = list(github_analytics.REPOSITORIES)[1:]
-        with patch.object(refresh_github_analytics, "load_cached_report", return_value=sample_report()), patch.object(
+        slot = dt.datetime(2026, 11, 26, 11, 20, tzinfo=dt.timezone.utc)
+        _, refreshed, *remaining = github_analytics.repositories_for_refresh(slot)
+        current = {**sample_report(), "generatedAt": "2026-11-26T11:23:00Z"}
+        with patch.object(refresh_github_analytics, "refresh_slot", return_value=slot), patch.object(
+            refresh_github_analytics, "load_cached_report", side_effect=lambda repo: current if repo == refreshed else sample_report()
+        ), patch.object(
             refresh_github_analytics, "build_report", side_effect=[RuntimeError("provider down")] + [sample_report()] * len(remaining)
         ) as build, patch.object(refresh_github_analytics, "store_report") as store, self.assertLogs(level="ERROR"):
             with self.assertRaises(RuntimeError):
                 refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
-        self.assertEqual(build.call_count, len(github_analytics.REPOSITORIES))
+        self.assertEqual([args.kwargs["repository"] for args in build.call_args_list], ["photographywebsite", *remaining])
         self.assertEqual(store.call_args_list, [call(sample_report(), repository) for repository in remaining])
 
     def test_cache_entries_are_independent_and_website_key_is_preserved(self):
@@ -261,6 +296,10 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
         self.assertIn({"name": "Rust", "lines": 1}, flix["languages"])
         self.assertIn({"name": "Desktop App", "lines": 1}, flix["areas"])
         self.assertIn({"name": "Tests", "lines": 1}, flix["areas"])
+        for app in ("TruongPhoto", "TruongSync"):
+            self.assertEqual(github_analytics._source_area("src-tauri/src/main.rs", app), "Desktop App")
+            self.assertEqual(github_analytics._source_area("crates/engine/src/lib.rs", app), "Desktop App")
+            self.assertEqual(github_analytics._source_area("crates/engine/tests/source.rs", app), "Tests")
         cleaner = github_analytics._summarize_sources("b" * 40, [
             ("src/TruongCleaner/App.swift", b"struct CleanerApp {}\n"),
             ("Packages/CleanerKit/Tests/CoreTests/ScanTests.swift", b"func testScan() {}\n"),

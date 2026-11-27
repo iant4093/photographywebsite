@@ -8,7 +8,14 @@ import logging
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from front_door import verify_front_door_request
-from github_analytics import OWNER, REPOSITORIES, load_cached_report, validate_repository
+from github_analytics import (
+    OWNER,
+    REPOSITORIES,
+    load_cached_report,
+    refresh_slot,
+    repositories_for_refresh,
+    validate_repository,
+)
 from response_helpers import error_response, json_response
 
 
@@ -25,9 +32,11 @@ def _cache_status(report):
         return "stale"
 
 
-def _next_refresh():
-    now = dt.datetime.now(dt.timezone.utc)
-    return (now.replace(minute=20, second=0, microsecond=0) + dt.timedelta(hours=1 if now.minute >= 20 else 0)).isoformat().replace("+00:00", "Z")
+def _next_refresh(repository):
+    next_slot = refresh_slot(dt.datetime.now(dt.timezone.utc)) + dt.timedelta(hours=1)
+    if repository != ALL_REPOSITORIES and repository not in repositories_for_refresh(next_slot):
+        next_slot += dt.timedelta(hours=1)
+    return next_slot.isoformat().replace("+00:00", "Z")
 
 
 def _snapshot(repository):
@@ -64,7 +73,7 @@ def handler(event, context):
             for name, config in REPOSITORIES.items()
         ]
         result["cacheStatus"] = status
-        result["nextRefreshAt"] = _next_refresh()
+        result["nextRefreshAt"] = _next_refresh(repository)
         actor_type, auth_method = actor_context(event)
         emit_audit_event(
             event_name="provider.github_analytics",

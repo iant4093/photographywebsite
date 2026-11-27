@@ -14,6 +14,8 @@ const REPOSITORIES = [
     { name: 'TruongCleaner', label: 'TruongCleaner' },
     { name: 'TruongPaper', label: 'TruongPaper' },
     { name: 'TruongStream', label: 'TruongStream' },
+    { name: 'TruongPhoto', label: 'TruongPhoto' },
+    { name: 'TruongSync', label: 'TruongSync' },
 ]
 const ALL_REPOS = 'all'
 const REPO_OPTIONS = [
@@ -258,7 +260,7 @@ export default function GitHubAnalytics() {
                     {overview?.staleCount > 0 && <div className="github-stale">Combined totals include stale snapshots from {number(overview.staleCount)} {overview.staleCount === 1 ? 'repository' : 'repositories'}.</div>}
                     <div className="github-generated">
                         <span>{overview ? `${overview.availableCount} of ${overview.entries.length} repository snapshots included` : `Generated ${dateLabel(report.generatedAt)}`}</span>
-                        <span>Refreshes hourly · Next refresh {dateLabel(report.nextRefreshAt)}</span>
+                        <span>Next refresh {dateLabel(report.nextRefreshAt)}</span>
                     </div>
 
                     <section className="github-metrics" aria-label={overview ? 'All repositories summary' : 'Repository summary'}>
@@ -293,7 +295,7 @@ export default function GitHubAnalytics() {
                             <div><p className="github-eyebrow">Development activity</p><h2 id="github-activity-heading">Weekly code movement</h2></div>
                             <div className="github-legend"><span><i className="github-additions-dot" /> Additions</span><span><i className="github-deletions-dot" /> Deletions</span></div>
                         </div>
-                        {report.activity?.status === 'ready' && report.activity.weeks?.length ? <ActivityChart weeks={report.activity.weeks} /> : <p className="github-empty">GitHub is preparing repository activity statistics. The next hourly refresh will check again.</p>}
+                        {report.activity?.status === 'ready' && report.activity.weeks?.length ? <ActivityChart weeks={report.activity.weeks} /> : <p className="github-empty">GitHub is preparing repository activity statistics. The next refresh will check again.</p>}
                         {overview?.activityCount > 0 && overview.activityCount < overview.entries.length && (
                             <p className="github-method">Weekly activity is available for {overview.activityCount} of {overview.entries.length} repositories.</p>
                         )}

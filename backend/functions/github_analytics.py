@@ -31,6 +31,7 @@ MAX_ARCHIVE_EXPANDED_BYTES = 160_000_000
 MAX_ARCHIVE_FILES = 25_000
 MAX_SOURCE_FILE_BYTES = 3_000_000
 GITHUB_API_VERSION = "2026-03-10"
+REFRESH_MINUTE = 20
 SCHEDULED_REFRESH_EVENT = {
     "source": "ian.photography.github-analytics-refresh",
     "action": "refresh",
@@ -51,12 +52,16 @@ REPOSITORIES = {
     "TruongCleaner": {"branch": "main", "label": "TruongCleaner"},
     "TruongPaper": {"branch": "main", "label": "TruongPaper"},
     "TruongStream": {"branch": "main", "label": "TruongStream"},
+    "TruongPhoto": {"branch": "main", "label": "TruongPhoto"},
+    "TruongSync": {"branch": "main", "label": "TruongSync"},
 }
 _NATIVE_AREAS = {
     "TruongFlix": "Desktop App",
     "TruongCleaner": "macOS App",
     "TruongPaper": "Desktop App",
     "TruongStream": "Desktop App",
+    "TruongPhoto": "Desktop App",
+    "TruongSync": "Desktop App",
 }
 API_BASE = "https://api.github.com"
 ARCHIVE_BASE = "https://codeload.github.com"
@@ -86,6 +91,19 @@ class ProviderContractError(ValueError):
 
 def _utc_now():
     return dt.datetime.now(dt.timezone.utc)
+
+
+def refresh_slot(now):
+    return (now - dt.timedelta(minutes=REFRESH_MINUTE)).replace(minute=REFRESH_MINUTE, second=0, microsecond=0)
+
+
+def repositories_for_refresh(slot):
+    # Each report can make eight REST requests. Keep the website hourly
+    # and alternate the app batches under GitHub's unauthenticated limit.
+    apps = tuple(name for name in REPOSITORIES if name != REPOSITORY)
+    middle = (len(apps) + 1) // 2
+    batch = apps[:middle] if slot.hour % 2 == 0 else apps[middle:]
+    return (REPOSITORY, *batch)
 
 
 def _iso(value):
@@ -285,6 +303,8 @@ def _source_area(path, repository=None):
         return "Tests"
     if normalized.endswith(".swift"):
         return _NATIVE_AREAS.get(repository, "iPhone App")
+    if repository in ("TruongPhoto", "TruongSync") and normalized.startswith(("crates/", "src-tauri/")):
+        return _NATIVE_AREAS[repository]
     if repository in ("TruongFlix", "TruongPaper") and normalized.startswith("src-tauri/"):
         return _NATIVE_AREAS[repository]
     if repository == "TruongStream" and normalized.startswith(("app-ui/src-tauri/", "core/", "platform-macos/", "platform-windows/")):
