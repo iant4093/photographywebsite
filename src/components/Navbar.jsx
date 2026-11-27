@@ -59,6 +59,16 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     useEffect(() => {
         let frame = null
         const nav = navRef.current
+        const touchViewport = window.matchMedia('(pointer: coarse)').matches
+        const scrollRoot = document.documentElement
+        const scrollLocked = () => scrollRoot.matches('[data-lightbox-scroll-lock], [data-menu-scroll-lock]')
+        let directionStart = lastScrollY.current
+        let visibilityTimer
+        const cancelVisibility = () => {
+            clearTimeout(visibilityTimer)
+            visibilityTimer = undefined
+            directionStart = lastScrollY.current
+        }
         const setVisibility = (nextVisible) => {
             if (nextVisible === visibleRef.current) return
             visibleRef.current = nextVisible
@@ -68,27 +78,42 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
             const restored = nav?.dataset.routeCardNavbar
             if (!restored) return false
             lastScrollY.current = window.scrollY
+            cancelVisibility()
             setVisibility(restored === 'shown')
             return true
         }
         const update = () => {
             frame = null
             if (restoreVisibility()) return
-            if (document.documentElement.hasAttribute('data-lightbox-scroll-lock')
-                || document.documentElement.hasAttribute('data-menu-scroll-lock')) return
-            const currentScrollY = window.scrollY
-            const restoreTop = document.documentElement.dataset.routeScrollRestoring
+            if (scrollLocked()) {
+                cancelVisibility()
+                return
+            }
+            const currentScrollY = Math.max(0, window.scrollY)
+            const restoreTop = scrollRoot.dataset.routeScrollRestoring
             if (restoreTop !== undefined) {
                 lastScrollY.current = currentScrollY
+                cancelVisibility()
                 if (Number(restoreTop) < 10) setVisibility(true)
                 return
             }
-            if (currentScrollY === lastScrollY.current) return
-            const nextVisible = currentScrollY < 10 || currentScrollY < lastScrollY.current
-                ? true
-                : !(currentScrollY > 50 && currentScrollY > lastScrollY.current)
-            setVisibility(nextVisible)
+            const delta = currentScrollY - lastScrollY.current
+            if (!delta) return
             lastScrollY.current = currentScrollY
+            const nextVisible = currentScrollY < 10 || delta < 0
+                ? true
+                : currentScrollY <= 50
+            if (!touchViewport || currentScrollY < 10 || nextVisible === visibleRef.current) {
+                cancelVisibility()
+                setVisibility(nextVisible)
+            } else if (visibilityTimer === undefined && Math.abs(currentScrollY - directionStart) >= 24) {
+                // A quick reversal can outlast one scroll frame. Let the new
+                // direction settle briefly before moving the masthead.
+                visibilityTimer = window.setTimeout(() => {
+                    cancelVisibility()
+                    if (!scrollLocked() && scrollRoot.dataset.routeScrollRestoring === undefined) setVisibility(nextVisible)
+                }, 80)
+            }
         }
         const handleScroll = () => {
             if (frame === null) frame = window.requestAnimationFrame(update)
@@ -98,6 +123,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
         return () => {
             nav?.removeEventListener('route-card-navbar-restore', restoreVisibility)
             window.removeEventListener('scroll', handleScroll)
+            cancelVisibility()
             if (frame !== null) window.cancelAnimationFrame(frame)
         }
     }, [])

@@ -1023,11 +1023,29 @@ async function mobileToolbarLayoutCase() {
                     `${name} holds steady during a height change (${JSON.stringify(geometry)} vs ${JSON.stringify(current[name])})`)
             }
         }
+        const navbar = page.locator('.linen-nav')
+        await page.locator('.linen-nav:not([data-navbar-visible])').waitFor({ state: 'attached' })
+        const { start, navbarStates } = await page.evaluate(async () => {
+            const nav = document.querySelector('.linen-nav')
+            const start = scrollY
+            const navbarStates = []
+            for (const offset of [-4, 3, -42, 8, -48, 5]) {
+                scrollTo({ top: start + offset, behavior: 'instant' })
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                navbarStates.push(nav.hasAttribute('data-navbar-visible'))
+            }
+            return { start, navbarStates }
+        })
+        assert.ok(navbarStates.every(visible => !visible), 'The navbar stays hidden through quick direction reversals')
+        await page.evaluate(top => scrollTo({ top, behavior: 'instant' }), start - 64)
+        await navbar.and(page.locator('[data-navbar-visible]')).waitFor({ state: 'attached' })
+        await page.evaluate(top => scrollTo({ top, behavior: 'instant' }), start + 8)
+        await page.locator('.linen-nav:not([data-navbar-visible])').waitFor({ state: 'attached' })
         await button.tap()
         await page.waitForFunction(() => scrollY < 1)
         await page.setViewportSize({ width: 430, height: 840 })
         await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--linen-viewport-small-height') === '840px')
-        const result = { engine, width, check: 'mobile viewport changes keep the catalog steady and Back to Top at the bottom', passed: true }
+        const result = { engine, width, check: 'mobile viewport and direction changes keep the catalog and controls steady', passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }
