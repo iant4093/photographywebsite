@@ -458,6 +458,7 @@ export function installLightboxMotion(dialog, config, trigger) {
     const reduced = prefersReducedLightboxMotion()
     const touch = window.matchMedia?.('(pointer: coarse)').matches
     const origin = takeLightboxTrigger(initial.originKind ?? kind, initial.key, initial.origin, trigger)
+    const photoCard = kind === 'photo' && initial.origin?.kind === 'photo'
     const animate = kind === 'qr' ? runQrMotion : runMotion
     const readPose = kind === 'qr' ? snapshotQr : snapshot
     let run
@@ -509,6 +510,10 @@ export function installLightboxMotion(dialog, config, trigger) {
         const schedule = () => {
             cancelAnimationFrame(frame)
             frame = requestAnimationFrame(() => {
+                if (photoCard && config()?.key !== initial.key) {
+                    finishEntrance()
+                    return
+                }
                 const target = getTarget(dialog, kind)
                 if (!target || (kind === 'video' && !videoRatio(target))) return
                 start(origin, snapshot(dialog))
@@ -520,7 +525,7 @@ export function installLightboxMotion(dialog, config, trigger) {
             waitingForMetadata = schedule
             dialog.addEventListener('loadedmetadata', waitingForMetadata, true)
         }
-        timer = window.setTimeout(() => start(null), 1250)
+        if (!photoCard) timer = window.setTimeout(() => start(null), 1250)
         schedule()
     } else start(origin)
 

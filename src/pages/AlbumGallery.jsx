@@ -81,7 +81,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
     const eagerImageCount = window.matchMedia?.('(min-width: 1024px)').matches ? 3
         : window.matchMedia?.('(min-width: 640px)').matches ? 2 : 1
     // Each photo section owns its lightbox navigation.
-    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(images)
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev, motionOrigin } = usePhotoSections(images)
 
     const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '', reuseOriginals = true } = {}) => {
         const scope = albumRequestScopeRef.current
@@ -344,6 +344,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                             <PhotoLightbox
                                 images={lightboxImages}
                                 index={lightboxIndex}
+                                motionOrigin={motionOrigin}
                                 ariaLabel={`Photo viewer for ${album.title}`}
                                 onClose={closeLightbox}
                                 onNext={goNext}

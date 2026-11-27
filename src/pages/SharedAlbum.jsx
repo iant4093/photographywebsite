@@ -52,7 +52,7 @@ export default function SharedAlbum({ theme = 'light' }) {
     const zipControllerRef = useRef(null)
 
     // Lightbox
-    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(images, album?.type !== 'video')
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev, motionOrigin } = usePhotoSections(images, album?.type !== 'video')
     const sharedMediaId = (() => {
         const params = new URLSearchParams(location.search)
         return params.get('photo') || params.get('video')
@@ -445,6 +445,7 @@ export default function SharedAlbum({ theme = 'light' }) {
                 <PhotoLightbox
                     images={lightboxImages}
                     index={lightboxIndex}
+                    motionOrigin={motionOrigin}
                     ariaLabel={`Photo viewer for ${album.title}`}
                     onClose={closeLightbox}
                     onNext={goNext}

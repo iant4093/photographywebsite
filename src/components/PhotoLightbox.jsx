@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AccessibleLightbox from './AccessibleLightbox'
-import { requestLightboxClose } from '../utils/lightboxMotionControl'
+import { requestLightboxClose, settleLightboxEntrance } from '../utils/lightboxMotionControl'
 import {
     mediaBeforeDisplayUrl,
     mediaBeforeSrcSet,
@@ -229,6 +229,11 @@ function PhotoLightbox({
     const hasOriginalComparison = Boolean(before && ['unresolved', 'ready', 'pending', 'unavailable', 'failed'].includes(before.status))
     const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
     const adminMode = Boolean(adminControls)
+    const handlePreviewError = (event) => {
+        const dialog = motionOrigin?.kind === 'photo' && event.currentTarget.closest('.linen-photo-lightbox[data-lightbox-awaiting]')
+        if (dialog) settleLightboxEntrance(dialog)
+        onMediaError?.(event)
+    }
     const handleFullImageLoad = (event) => {
         const url = event.currentTarget.currentSrc || event.currentTarget.src
         afterImageDecode(event.currentTarget, () => {
@@ -241,7 +246,7 @@ function PhotoLightbox({
 
             markImageReady(url)
             setPreview(current => current.id === activeId ? { ...current, ready } : current)
-        }, onMediaError)
+        }, handlePreviewError)
     }
 
     const refreshOriginal = (event, allowMediaError = false, isRetry = false) => {
@@ -362,6 +367,7 @@ function PhotoLightbox({
                 onClick={handleBlankSpaceClick}
             >
                 <div className="linen-lightbox-media-stage flex-1 min-h-0 flex items-center justify-center w-full relative">
+                    {motionOrigin?.kind === 'photo' && <p role="status" className="linen-lightbox-photo-wait absolute text-sm text-white">Loading photo…</p>}
                     {activeImage ? (
                         <div
                             ref={containerRef}
@@ -400,7 +406,7 @@ function PhotoLightbox({
                                 alt={photoDescription(activeImage, ariaLabel, index, images.length)}
                                 aria-hidden={showingBefore || undefined}
                                 onLoad={handleFullImageLoad}
-                                onError={onMediaError}
+                                onError={handlePreviewError}
                                 width={activeImage.width}
                                 height={activeImage.height}
                                 decoding="async"

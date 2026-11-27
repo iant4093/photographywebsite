@@ -23,8 +23,8 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                     className="album-photo-tile linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                     data-lightbox-item={mediaId(img)}
                     onClick={event => {
-                        rememberLightboxTrigger(event.currentTarget, 'photo', mediaId(img))
-                        onOpen(img)
+                        const origin = rememberLightboxTrigger(event.currentTarget, 'photo', mediaId(img))
+                        onOpen(img, origin)
                     }}
                     onPointerMove={handlePointerTilt}
                     onPointerLeave={handlePointerTilt}

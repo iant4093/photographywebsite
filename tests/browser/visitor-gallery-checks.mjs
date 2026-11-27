@@ -452,6 +452,58 @@ async function viewerCase(width, failModule = false, kind = 'random') {
     } finally { await context.close() }
 }
 
+async function slowPhotoCardMotionCase(width, delay) {
+    const { context, page, cdp } = await openCase({ width })
+    let release
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        const { items: [album], photos: [photo] } = fixture(1)
+        if (delay === 'photo') {
+            photo.url = `https://${mediaDomain}/slow-viewer-photo.webp`
+            delete photo.previewSrcSet
+            await page.route(`**/public/albums/${album.albumId}`, route => route.fulfill({ json: { album, images: [photo] } }))
+        }
+        const delayed = delay === 'photo' ? /\/slow-viewer-photo\.webp$/ : /\/lightboxMotion-[^/]+\.js$/
+        const pending = new Promise(resolve => { release = resolve })
+        await page.route(delayed, async route => {
+            await pending
+            await route.fallback()
+        })
+        await page.goto(origin + '/album/' + album.albumId)
+        const tile = page.locator('[data-lightbox-item]').first()
+        await tile.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
+        const request = page.waitForRequest(request => delayed.test(new URL(request.url()).pathname))
+        await tile.click()
+        await request
+        const dialog = page.getByRole('dialog')
+        await dialog.waitFor()
+        // Hold the request longer than the previous cutoff for this phase.
+        await page.waitForTimeout(delay === 'photo' ? 1500 : 400)
+        const waiting = await dialog.evaluate(element => element.hasAttribute('data-lightbox-awaiting'))
+        assert.ok(waiting, `The viewer preserves the transition while the ${delay} is still loading`)
+        const flight = dialog.locator('.lightbox-motion-flight')
+        if (delay === 'motion module') {
+            await dialog.getByRole('button', { name: 'Close photo viewer' }).click()
+            await dialog.waitFor({ state: 'detached' })
+            await tile.click()
+            await dialog.waitFor()
+        }
+        release()
+        await flight.waitFor()
+        assert.ok(await flight.evaluate(element => element.getAnimations().some(animation => {
+            const frames = animation.effect.getKeyframes()
+            return frames[0].transform && frames[0].transform !== frames.at(-1).transform
+        })), 'The photo travels from its card when the viewer is ready')
+        await flight.waitFor({ state: 'detached' })
+        await page.keyboard.press('Escape')
+        await flight.waitFor()
+        await dialog.waitFor({ state: 'detached' })
+        assert.ok(await tile.evaluate(element => document.activeElement === element), 'Closing returns focus to the card')
+        const result = { engine, width, check: `photo card opens and returns after a slow ${delay} request`, passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
+    } finally { release?.(); await context.close() }
+}
+
 async function lightboxStabilityCase(width) {
     const { context, page, cdp } = await openCase({ width })
     try {
@@ -1408,6 +1460,29 @@ async function slowAlbumTitleMotionCase(width, type) {
         if (video) await page.goto(origin + catalogPath)
         const card = page.locator(`.catalog-section [data-route-card="album"][href="${detailPath}"]`)
         await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+        const checkWaitingTitle = async () => {
+            const pose = () => page.locator('main').evaluate(main => {
+                const stage = main.parentElement.querySelector('[data-route-card-morph]')
+                const title = stage?.querySelector('.route-card-title')
+                const cue = stage?.querySelector('.route-card-loading')
+                return {
+                    pageOpacity: Number(getComputedStyle(main).opacity),
+                    title: title?.getBoundingClientRect().toJSON(),
+                    titleVisible: title && getComputedStyle(title).visibility === 'visible',
+                    cueOpacity: cue ? Number(getComputedStyle(cue).opacity) : 0,
+                }
+            })
+            // Sample after the old skeleton reveal and again after the new cue.
+            await page.waitForTimeout(350)
+            const initial = await pose()
+            assert.ok(initial.titleVisible && initial.pageOpacity === 0 && initial.cueOpacity === 0,
+                'A short loading delay keeps the title visible without a skeleton flash')
+            await page.waitForTimeout(500)
+            const delayed = await pose()
+            assert.ok(delayed.titleVisible && delayed.pageOpacity === 0 && delayed.cueOpacity > 0,
+                'A longer wait adds a loading cue while the title stays visible')
+            assert.deepEqual(delayed.title, initial.title, 'The title stays in its departure position until it can move')
+        }
         await page.evaluate(() => {
             const main = document.getElementById('main-content')
             window.__visitor.albumTitleMotions = {}
@@ -1425,9 +1500,7 @@ async function slowAlbumTitleMotionCase(width, type) {
         await card.click()
         await page.waitForURL(origin + detailPath)
         await detailRequest
-        // Hold both responses beyond the previous morph timeout.
-        await page.waitForTimeout(850)
-        const detailLoaderVisible = await page.locator('main').evaluate(main => Number(getComputedStyle(main).opacity) > 0)
+        await checkWaitingTitle()
         releaseDetail()
         await page.locator('.linen-gallery-header h1').waitFor()
         await page.waitForFunction(() => 'enter' in window.__visitor.albumTitleMotions)
@@ -1447,14 +1520,12 @@ async function slowAlbumTitleMotionCase(width, type) {
         if (video) await page.getByRole('button', { name: 'Back to Videos' }).click()
         else await page.goBack()
         await catalogRequest
-        await page.waitForTimeout(850)
-        const catalogLoaderVisible = await page.locator('main').evaluate(main => Number(getComputedStyle(main).opacity) > 0)
+        await checkWaitingTitle()
         releaseCatalog()
         await card.waitFor()
         await page.waitForFunction(() => 'return' in window.__visitor.albumTitleMotions)
         await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
         assert.deepEqual(await page.evaluate(() => window.__visitor.albumTitleMotions), { enter: true, return: true })
-        assert.ok(detailLoaderVisible && catalogLoaderVisible, 'Loading placeholders are visible during slow navigation')
         assert.equal(await page.locator('[data-route-title-landing], [data-route-card-morph]').count(), 0)
         const result = { engine, width, check: `${type} album title travels after slow album and catalog responses`, passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
@@ -2071,8 +2142,14 @@ async function floatingEdgeCase(width) {
 
 try {
     const albumTitlesOnly = process.env.VISITOR_ALBUM_TITLES_ONLY === '1'
-    const widths = engine === 'firefox' || albumTitlesOnly ? [1440] : [1440, 390]
+    const photoCardMotionOnly = process.env.VISITOR_PHOTO_CARD_MOTION_ONLY === '1'
+    const widths = engine === 'firefox' || albumTitlesOnly || photoCardMotionOnly ? [1440] : [1440, 390]
     for (const width of widths) {
+        if (photoCardMotionOnly) {
+            await slowPhotoCardMotionCase(width, 'motion module')
+            await slowPhotoCardMotionCase(width, 'photo')
+            continue
+        }
         if (albumTitlesOnly) {
             await slowAlbumTitleMotionCase(width, 'photo')
             await slowAlbumTitleMotionCase(width, 'video')
@@ -2113,6 +2190,8 @@ try {
             await routeSectionMotionCase(width)
             await routeTimelineLandingCase(width)
             await lightboxStabilityCase(width)
+            await slowPhotoCardMotionCase(width, 'motion module')
+            await slowPhotoCardMotionCase(width, 'photo')
         }
         await qrMotionCase(width)
         await exploreHandoffCase(width)

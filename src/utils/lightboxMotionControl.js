@@ -72,22 +72,29 @@ export function mountLightboxMotion(dialog, config, trigger) {
         return mountMediaFade(dialog, motion)
     }
     if (installer) return installer(dialog, config, trigger)
+    const photoCard = motion.kind === 'photo' && motion.origin?.kind === 'photo' && motion.origin.rect
+    const waitingAttribute = photoCard ? 'data-lightbox-awaiting' : 'data-lightbox-booting'
     let release
     let waiting = true
-    dialog.dataset.lightboxBooting = ''
+    dialog.setAttribute(waitingAttribute, '')
     const show = () => {
+        if (!waiting) return false
         waiting = false
-        delete dialog.dataset.lightboxBooting
+        dialog.removeAttribute(waitingAttribute)
+        if (photoCard) lightboxMotionControllers.delete(dialog)
+        return true
     }
-    // A slow or failed animation chunk should leave the ordinary viewer usable.
-    const timer = window.setTimeout(() => {
-        show()
-        motion.onOpened?.()
-    }, 120)
+    const finish = () => { if (show()) motion.onOpened?.() }
+    // Keep a cold photo card's origin while the chunk loads. Close and
+    // keyboard navigation can still bypass the pending entrance.
+    const timer = photoCard ? undefined : window.setTimeout(finish, 120)
+    if (photoCard) lightboxMotionControllers.set(dialog, {
+        settle: finish,
+        requestClose(close) { if (show()) close() },
+    })
     void preloadLightboxMotion().then(install => {
-        if (!waiting) return
         clearTimeout(timer)
-        show()
+        if (!show()) return
         if (install) release = install(dialog, config, trigger)
         else motion.onOpened?.()
     })

@@ -201,8 +201,8 @@ describe('lightbox motion lifecycle', () => {
         expect(animate(flight(), 'opacity').options).toMatchObject({ delay: 0, duration: 430 })
     })
 
-    it('falls back if the photo fails to become ready and restores controls', async () => {
-        const { open, frame, dialog, config } = photo()
+    it('falls back if the featured photo fails to become ready and restores controls', async () => {
+        const { open, frame, dialog, config } = photo({ originKind: 'button' })
         frame.classList.remove('is-loaded')
         open()
         await vi.advanceTimersByTimeAsync(1250)
@@ -211,6 +211,22 @@ describe('lightbox motion lifecycle', () => {
         expect(animate(dialog, 'opacity').frames).toEqual([{ opacity: 0 }, { opacity: 1 }])
         await vi.advanceTimersByTimeAsync(160)
         expect(config.onOpened).toHaveBeenCalledOnce()
+    })
+
+    it('cancels a slow photo card entrance when the viewer closes', async () => {
+        const { open, close, frame, dialog, trigger, config } = photo()
+        config.origin = rememberLightboxTrigger(trigger, 'photo', config.key)
+        frame.classList.remove('is-loaded')
+        open()
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(dialog).toHaveAttribute('data-lightbox-awaiting')
+        const closed = close()
+        frame.classList.add('is-loaded')
+        await vi.advanceTimersByTimeAsync(400)
+        expect(dialog).not.toHaveAttribute('data-lightbox-awaiting')
+        expect(flight()).toBeNull()
+        expect(closed).toHaveBeenCalledOnce()
+        expect(config.onOpened).not.toHaveBeenCalled()
     })
 
     it('uses the reduced-motion fade even when a photo fits both frames', async () => {

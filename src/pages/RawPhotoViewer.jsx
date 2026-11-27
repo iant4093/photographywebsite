@@ -88,7 +88,7 @@ export default function RawPhotoViewer() {
     }, [shownFolderId, navigationType])
 
     const photos = useMemo(() => (data?.photos || []).map(toViewerPhoto), [data])
-    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(photos, false)
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev, motionOrigin } = usePhotoSections(photos, false)
     const eagerImageCount = window.matchMedia?.('(min-width: 1024px)').matches ? 3
         : window.matchMedia?.('(min-width: 640px)').matches ? 2 : 1
 
@@ -223,6 +223,7 @@ export default function RawPhotoViewer() {
                             <PhotoLightbox
                                 images={activeImages}
                                 index={lightboxIndex}
+                                motionOrigin={motionOrigin}
                                 ariaLabel={`Photo viewer for ${title}`}
                                 onClose={closeLightbox}
                                 onNext={goNext}

@@ -411,6 +411,12 @@ function stageCard(main, from, returning, record) {
     if (wasClipped && !returning && !clearBottomTitle) titles.style.clipPath = from.clip
     layer.append(titles)
     const label = from.title ? titleLayer(titles, from.title) : null
+    const loading = albumMorph ? document.createElement('span') : null
+    if (loading) {
+        loading.className = 'route-card-loading'
+        loading.textContent = returning ? 'Loading albums…' : 'Loading album…'
+        layer.append(loading)
+    }
     main.dataset.routePageStaged = ''
     if (returning) main.dataset.routePageReturning = ''
     main.parentElement.append(layer)
@@ -420,6 +426,9 @@ function stageCard(main, from, returning, record) {
     let resumeHover
     let interactiveTimer
     return {
+        setLoading(visible) {
+            loading?.toggleAttribute('data-route-card-loading', visible)
+        },
         reveal(to) {
             if (isClipped(to)) {
                 if (marker === 'floating') return returning ? floatingReturnReveal : floatingEntryReveal
@@ -646,7 +655,7 @@ export default function RouteCardMotion() {
                 loadingObserver?.disconnect()
                 loadingObserver = undefined
                 clearTimeout(loadingTimer)
-                delete main.dataset.routePageWaiting
+                stage?.setLoading(false)
             }
             const cleanup = () => {
                 interruption?.abort()
@@ -707,8 +716,8 @@ export default function RouteCardMotion() {
                 if (waitForAlbum && !to && (page?.hasAttribute('data-route-loading') || (committed && page?.getAttribute('aria-busy') === 'true'))) {
                     if (!loadingObserver) {
                         // Loading is separate from settling the destination geometry.
-                        // Leave the placeholders visible on slow requests and wake on commit.
-                        loadingTimer = window.setTimeout(() => { main.dataset.routePageWaiting = '' }, 200)
+                        // Keep the title on screen and add a cue only for longer waits.
+                        loadingTimer = window.setTimeout(() => stage.setLoading(true), 650)
                         loadingObserver = new MutationObserver(step)
                         loadingObserver.observe(main, { childList: true, subtree: true, attributes: true,
                             attributeFilter: ['aria-busy', 'data-route-content', 'data-route-loading'] })
