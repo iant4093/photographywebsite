@@ -2016,7 +2016,7 @@ async function albumLowerEdgeOpeningCase(width, partial = false) {
 }
 
 async function routeCardClipCase(width, timeline = false, sliver = false) {
-    const { context, page, cdp } = await openCase({ width, titleSuffix: timeline ? ' · Canopy study' : '' })
+    const { context, page, cdp } = await openCase({ width, titleSuffix: timeline ? ' · Canopy study' : ' · Evening light' })
     try {
         if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
         if (timeline) {
@@ -2062,18 +2062,21 @@ async function routeCardClipCase(width, timeline = false, sliver = false) {
             const masking = await title.evaluate(element => ({
                 clip: element.style.clipPath, gradient: getComputedStyle(element).maskImage,
                 offset: parseFloat(element.style.maskPosition), width: parseFloat(element.style.maskSize),
+                maskClip: getComputedStyle(element).maskClip, size: element.style.maskSize,
             }))
             assert.match(masking.clip, /^inset\(/, 'A partly visible card morphs its visible title crop')
             if (!timeline) {
                 assert.equal(masking.gradient, edge.gradient, 'The title carries the same gradient as the carousel')
                 assert.ok(masking.offset > 0 && masking.width >= width - 80, 'The gradient aligns with the carousel edge')
+                assert.equal(masking.maskClip, 'no-clip', 'The gradient can paint beyond the title box')
+                assert.match(masking.size, /calc\(100% \+ 0\.5em\)/, 'The gradient extends past the descenders')
             }
         }
         await page.waitForURL('**/album/**')
         const entering = page.locator('main[data-route-page-motion="enter"]')
         await entering.waitFor({ state: 'attached' })
-        if (!sliver) await assertClippedTitlePace(title, false, timeline)
-        await assertTitleWindow(title, false, edge.left, timeline)
+        if (!sliver) await assertClippedTitlePace(title, false)
+        await assertTitleWindow(title, false, edge.left)
         assert.equal(await page.locator('.route-card-outline').count(), 0, 'A clipped title travels without an outline')
         await entering.waitFor({ state: 'detached' })
         await page.goBack()
@@ -2089,8 +2092,8 @@ async function routeCardClipCase(width, timeline = false, sliver = false) {
             assert.equal(landing.crop, 'none', 'Only the timeline row crops the title on return')
             assert.ok(landing.landsOpaque, 'The title keeps its opacity as the card disappears behind the row edge')
             if (sliver) assert.ok(landing.x > edge.right - 18, `The title returns to the partly hidden card (${landing.x} vs ${edge.right})`)
-        } else await assertClippedTitlePace(title, true, timeline)
-        await assertTitleWindow(title, true, edge.left, timeline)
+        } else await assertClippedTitlePace(title, true)
+        await assertTitleWindow(title, true, edge.left)
         assert.equal(await page.locator('.route-card-outline').count(), 0, 'A clipped title returns without an outline')
         const result = { engine, width, check: `${sliver ? 'nearly hidden' : 'partly visible'} ${timeline ? 'timeline' : 'carousel'} titles stay inside the row at the handoff`, passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
@@ -2102,7 +2105,7 @@ function parseInsets(clip) {
     return { top, right, bottom, left }
 }
 
-async function assertTitleWindow(title, returning, left, timeline) {
+async function assertTitleWindow(title, returning, left) {
     const [first, second] = await title.evaluate((element, returning) => {
         const animation = element.parentElement.getAnimations().find(entry => entry.effect.getKeyframes()[0].clipPath)
         const frames = animation?.effect.getKeyframes() ?? [{ clipPath: getComputedStyle(element.parentElement).clipPath },
@@ -2112,21 +2115,20 @@ async function assertTitleWindow(title, returning, left, timeline) {
     assert.equal(first, second, 'The clipping window stays fixed by the row during the handoff')
     const insets = parseInsets(first)
     assert.ok(Math.abs(left - insets.left) < 1, 'Text is clipped to the row boundary')
-    if (timeline) assert.deepEqual([insets.top, insets.bottom], [0, 0], 'A horizontal crop does not trim moving letterforms vertically')
+    assert.deepEqual([insets.top, insets.bottom], [0, 0], 'A horizontal crop does not trim moving letterforms vertically')
 }
 
-async function assertClippedTitlePace(title, returning, timeline) {
+async function assertClippedTitlePace(title, returning) {
     const motion = await title.evaluate(element => {
         const clip = element.getAnimations().find(animation => animation.effect.getKeyframes()[0].clipPath)
         return clip && { duration: clip.effect.getTiming().duration, crop: clip.effect.getKeyframes().map(frame => frame.clipPath) }
     })
     assert.ok(motion?.duration >= 350)
     assert.notEqual(motion.crop[0], motion.crop[1], 'The title crop changes continuously')
-    if (timeline) {
-        const insets = motion.crop.map(parseInsets)
-        assert.ok(insets.every(({ bottom }) => bottom < 0), 'The moving descenders have room on both ends of the morph')
-        assert.equal(insets[returning ? 0 : 1].left, 0, 'The album heading is uncropped horizontally')
-    } else assert.match(motion.crop[returning ? 0 : 1], /^inset\(0%\)$/, 'The album heading is uncropped')
+    const insets = motion.crop.map(parseInsets)
+    assert.ok(insets.every(({ top, bottom }) => top < 0 && bottom < 0), 'The full glyphs have room on both ends of the morph')
+    const { left, right } = insets[returning ? 0 : 1]
+    assert.deepEqual([left, right], [0, 0], 'The album heading is uncropped horizontally')
 }
 
 async function routeCardEdgeOnlyCase(width, horizontal = false) {
@@ -2269,7 +2271,7 @@ async function floatingEdgeCase(width) {
         assert.equal(await heldTrack.evaluate(track => getComputedStyle(track).animationPlayState), 'paused')
         assert.equal(await returning.evaluate(main => main.getAnimations()[0].effect.getTiming().duration), 400)
         assert.equal(await morph.locator('.route-card-title').count(), 2, 'The title returns to its position on the moving card')
-        await assertTitleWindow(morph.locator('.route-card-title').first(), true, edge.left, true)
+        await assertTitleWindow(morph.locator('.route-card-title').first(), true, edge.left)
         await returning.waitFor({ state: 'detached' })
         await page.goForward()
         await morph.waitFor({ state: 'attached' })

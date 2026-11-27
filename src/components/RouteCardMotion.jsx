@@ -16,6 +16,7 @@ const albumEasing = 'cubic-bezier(.28,.16,.27,1)'
 const clippedEasing = 'cubic-bezier(.38,.06,.24,1)'
 const floatingEasing = 'cubic-bezier(.26,.45,.25,1)'
 const openClip = 'inset(0px 0px 0px 0px)'
+const titleInkBleed = '0.25em'
 
 function viewportRect(rect, clip, allowEdge = false, minWidth = allowEdge ? 12 : 32) {
     const left = Math.max(0, rect.left, clip?.left ?? 0)
@@ -29,7 +30,7 @@ function viewportRect(rect, clip, allowEdge = false, minWidth = allowEdge ? 12 :
 function titleClip(crop, preserveInk = false) {
     if (!crop && !preserveInk) return 'inset(0%)'
     const insets = (crop ?? [0, 0, 0, 0]).map((amount, index) =>
-        preserveInk && index % 2 === 0 && amount === 0 ? '-0.25em' : `${amount}%`)
+        preserveInk && index % 2 === 0 && amount === 0 ? `-${titleInkBleed}` : `${amount}%`)
     return `inset(${insets.join(' ')})`
 }
 
@@ -67,12 +68,14 @@ function readTitleStyle(pose) {
     const layoutHeight = Number.parseFloat(css.height) || height
     // Recreate the carousel's mask in the title's own coordinates so the
     // moving copy starts and ends with the same faded edge as the card.
+    // Extend the mask vertically so it covers glyphs outside the line box.
     const maskImage = boundary && getComputedStyle(boundary).maskImage
     const mask = maskImage?.startsWith('linear-gradient(') ? {
         maskImage,
-        maskSize: `${boundaryRect.width * layoutWidth / width}px 100%`,
-        maskPosition: `${(boundaryRect.left - left) * layoutWidth / width}px 0px`,
+        maskSize: `${boundaryRect.width * layoutWidth / width}px calc(100% + 2 * ${titleInkBleed})`,
+        maskPosition: `${(boundaryRect.left - left) * layoutWidth / width}px 50%`,
         maskRepeat: 'no-repeat',
+        maskClip: 'no-clip',
     } : undefined
     const style = {
         width: `${layoutWidth}px`, color, fontFamily, fontSize, fontWeight, fontStyle, fontKerning, fontFeatureSettings,
@@ -117,15 +120,15 @@ function cardPose(card, returning = false) {
         && (edge.y < 0 ? frame.top <= 1 : frame.top + frame.height >= innerHeight - 1)
     // A horizontal crop only needs the sides of the row. A moving title
     // crossing its top or bottom would otherwise lose its descenders.
-    const inlineClip = narrowRow && edge?.y === 0
+    const inlineClip = edge?.y === 0
     const clip = clipped && boundaryRect ? `inset(${[
         inlineClip ? 0 : boundaryRect.top, innerWidth - boundaryRect.right,
         inlineClip ? 0 : innerHeight - boundaryRect.bottom, boundaryRect.left,
     ].map(value => `${Math.max(0, value)}px`).join(' ')})` : openClip
     const inlineBounds = inlineClip && boundaryRect && { left: Math.max(0, boundaryRect.left), right: Math.min(innerWidth, boundaryRect.right) }
-    const rowTitle = inlineBounds && (marker === 'floating' || returning)
+    const rowTitle = inlineBounds && (marker === 'floating' || (returning && marker === 'timeline'))
     return { frame, clipped, clip, edge, inlineBounds, boundary, boundaryRect, viewportTitle, rowTitle,
-        preserveInk: marker === 'timeline' && inlineClip,
+        preserveInk: inlineClip,
         title: sliver && !viewportTitle && !rowTitle ? null : titleGeometry(title, frame, viewportTitle, rowTitle && inlineBounds),
         element: title, card }
 }
@@ -151,7 +154,8 @@ function capture(card, location) {
     const phases = floatingPhases(card.closest('.floating-print-wall'))
     const current = touchMotion() ? null : readTitleStyle(cardPose(card))
     const pose = current && { frame: current.frame, clipped: current.clipped, clip: current.clip, edge: current.edge,
-        inlineBounds: current.inlineBounds, viewportTitle: current.viewportTitle, rowTitle: current.rowTitle, title: current.title }
+        inlineBounds: current.inlineBounds, viewportTitle: current.viewportTitle, rowTitle: current.rowTitle,
+        preserveInk: current.preserveInk, title: current.title }
     return { from: location, marker: card.dataset.routeCard, path: cardPath(card), pose, phases,
         inMain: mainPage()?.contains(card), scrollY: window.scrollY,
         navbarVisible: navbar()?.hasAttribute('data-navbar-visible') }
@@ -500,7 +504,7 @@ function stageCard(main, from, returning, record) {
             previewHeading = heading
             const travel = { duration: 245, fill: 'both', easing: albumEasing }
             const crop = wasClipped && !from.viewportTitle
-            const { motions } = animateTitles(titles, label, from.title, landing, travel, null, true, crop && !from.rowTitle, false)
+            const { motions } = animateTitles(titles, label, from.title, landing, travel, null, true, crop && !from.rowTitle, from.preserveInk)
             if (crop && !(from.rowTitle && titleFitsRow(landing.title, from.inlineBounds))) {
                 motions.push(titles.animate([{ clipPath: from.clip }, { clipPath: openClip }], travel))
             }
@@ -561,9 +565,8 @@ function stageCard(main, from, returning, record) {
             }
             if (matchingTitle) {
                 resumeHover = holdCardHover(to.card)
-                const preserveInk = marker === 'timeline' && Boolean(croppedCard?.inlineBounds)
                 const title = animateTitles(titles, label, departure.title, to, travel, reveal, albumMorph || earlyReturn || moduleReturn,
-                    cropTitle && !croppedCard.rowTitle, preserveInk)
+                    cropTitle && !croppedCard.rowTitle, croppedCard?.preserveInk)
                 animations.push(...title.motions)
                 handoff = title.handoff
             } else if (albumMorph && croppedCard?.edge && to) {
