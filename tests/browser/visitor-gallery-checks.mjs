@@ -987,7 +987,7 @@ async function mobileToolbarLayoutCase() {
     const { context, page, cdp } = await openCase({ width, height: expandedHeight })
     try {
         if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
-        await page.addStyleTag({ content: '.linen-back-to-top { animation: none; transition: none }' })
+        await page.addStyleTag({ content: '.linen-back-to-top { animation: none }' })
         const card = page.locator('.catalog-section .album-card').first()
         await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
         const button = page.locator('.linen-back-to-top')
@@ -999,11 +999,12 @@ async function mobileToolbarLayoutCase() {
                 const { top, bottom, height, width } = node.getBoundingClientRect()
                 return { top, bottom, height, width }
             }
+            const button = document.querySelector('.linen-back-to-top').getBoundingClientRect()
             return {
                 cover: box(document.querySelector('.linen-hero')),
                 heading: box(document.getElementById('photo-albums')),
                 card: box(element),
-                button: box(document.querySelector('.linen-back-to-top')),
+                button: { bottomGap: innerHeight - button.bottom, rightGap: innerWidth - button.right },
                 rail: box(document.querySelector('.editorial-progress')),
                 scroll: { top: scrollY, height: document.documentElement.scrollHeight },
             }
@@ -1011,9 +1012,9 @@ async function mobileToolbarLayoutCase() {
         const paint = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
         await paint()
         const before = await positions()
-        assert.ok(before.button.bottom < expandedHeight && before.rail.bottom < expandedHeight,
-            'Both controls fit above the expanded toolbar')
-        for (const height of [900, expandedHeight]) {
+        assert.ok(before.rail.bottom < expandedHeight, 'The rail fits above the expanded toolbar')
+        assert.deepEqual(before.button, { bottomGap: 24, rightGap: 24 }, 'Back to Top starts in the visible bottom-right corner')
+        for (const height of [900, expandedHeight, 900]) {
             await page.setViewportSize({ width, height })
             await paint()
             const current = await positions()
@@ -1026,7 +1027,7 @@ async function mobileToolbarLayoutCase() {
         await page.waitForFunction(() => scrollY < 1)
         await page.setViewportSize({ width: 430, height: 840 })
         await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--linen-viewport-small-height') === '840px')
-        const result = { engine, width, check: 'mobile viewport height changes leave the catalog layout and controls steady', passed: true }
+        const result = { engine, width, check: 'mobile viewport changes keep the catalog steady and Back to Top at the bottom', passed: true }
         outcomes.push(result); console.log(JSON.stringify(result))
     } finally { await context.close() }
 }

@@ -40,7 +40,7 @@
 @supports (height: 100svh) {
   @media (pointer: coarse) {
     .linen-site {
-      /* Keep floating controls above the expanded browser toolbar. */
+      /* Preserve the catalog and filmstrip geometry as the toolbar moves. */
       --linen-mobile-height: var(--linen-viewport-small-height, 100svh);
       --linen-mobile-bottom-inset: env(safe-area-max-inset-bottom, 0px);
     }
@@ -51,10 +51,8 @@
     }
 
     .linen-site .linen-back-to-top {
-      top: calc(var(--linen-mobile-height) - max(1.5rem, var(--linen-mobile-bottom-inset)));
       right: max(1.5rem, env(safe-area-inset-right, 0px));
-      bottom: auto;
-      translate: 0 -100%;
+      bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
     }
   }
 
