@@ -1436,6 +1436,66 @@ async function routeCardMotionCase(width) {
     } finally { await context.close() }
 }
 
+async function wrappedAlbumTitleMotionCase(width) {
+    const { context, page, cdp } = await openCase({ width, titleSuffix: ' — A late afternoon walk through the old city streets' })
+    try {
+        if (cdp) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+        await page.addStyleTag({ content: '.catalog-section .album-card h3 { max-width: 15ch }' })
+        const card = page.locator('.catalog-section [data-route-card="album"]').nth(25)
+        await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+        const checkTravel = async mode => {
+            const main = page.locator(`main[data-route-page-motion="${mode}"]`)
+            await main.waitFor({ state: 'attached' })
+            const travel = await main.evaluate(element => {
+                const copies = [...element.parentElement.querySelectorAll('.route-card-title')]
+                const animation = copies[1].getAnimations().find(item => item.effect.getKeyframes()[0].transform)
+                const { duration } = animation.effect.getTiming()
+                const motions = copies.flatMap(copy => copy.getAnimations())
+                const times = motions.map(item => item.currentTime)
+                motions.forEach(item => item.pause())
+                const firstLetter = node => {
+                    const range = document.createRange()
+                    const text = document.createTreeWalker(node, NodeFilter.SHOW_TEXT).nextNode()
+                    const start = text.data.search(/\S/)
+                    range.setStart(text, start)
+                    range.setEnd(text, start + 1)
+                    const { left, top } = range.getBoundingClientRect()
+                    return [left, top]
+                }
+                const sample = ms => {
+                    motions.forEach(item => { item.currentTime = ms })
+                    return copies.map(copy => ({ point: firstLetter(copy), opacity: Number(getComputedStyle(copy).opacity) }))
+                }
+                const distance = ([x1, y1], [x2, y2]) => Math.hypot(x1 - x2, y1 - y2)
+                const start = sample(0)[0].point
+                const early = sample(32)[0].point
+                const differences = []
+                for (let step = 1; step < 20; step++) {
+                    const [from, to] = sample(duration * step / 20)
+                    if (from.opacity >= .15 && to.opacity >= .15) differences.push(distance(from.point, to.point))
+                }
+                const end = sample(duration)[1].point
+                const landing = firstLetter(element.querySelector('[data-route-title-landing]'))
+                motions.forEach((item, index) => { item.currentTime = times[index]; item.play() })
+                return { distance: distance(start, end), earlyFraction: distance(start, early) / distance(start, end),
+                    overlap: differences.length, separation: Math.max(...differences), landingGap: distance(end, landing) }
+            })
+            assert.ok(travel.distance > 180 && travel.overlap > 0, `Exercise a long flight and its crossfade (${JSON.stringify(travel)})`)
+            assert.ok(travel.separation < 2, `The text copies follow the same path during ${mode} (${JSON.stringify(travel)})`)
+            assert.ok(travel.earlyFraction < .21, `The title eases out of its starting position (${JSON.stringify(travel)})`)
+            assert.ok(travel.landingGap < 2, `The travelling text meets the live text in place (${JSON.stringify(travel)})`)
+            await main.waitFor({ state: 'detached' })
+            return travel
+        }
+        await card.click()
+        const entry = await checkTravel('enter')
+        await page.goBack()
+        const back = await checkTravel('return')
+        const result = { engine, width, check: 'wrapped album titles stay aligned in flight and ease into movement on open and Back', entry, back, passed: true }
+        outcomes.push(result); console.log(JSON.stringify(result))
+    } finally { await context.close() }
+}
+
 async function slowAlbumTitleMotionCase(width, type) {
     const { context, page, cdp } = await openCase({ width })
     let releaseDetail, releaseCatalog
@@ -2151,6 +2211,7 @@ try {
             continue
         }
         if (albumTitlesOnly) {
+            await wrappedAlbumTitleMotionCase(width)
             await slowAlbumTitleMotionCase(width, 'photo')
             await slowAlbumTitleMotionCase(width, 'video')
             continue
@@ -2178,6 +2239,7 @@ try {
             await mobileMediaMotionCase()
         } else {
             await routeCardMotionCase(width)
+            await wrappedAlbumTitleMotionCase(width)
             await slowAlbumTitleMotionCase(width, 'photo')
             await slowAlbumTitleMotionCase(width, 'video')
             await albumLowerEdgeOpeningCase(width)

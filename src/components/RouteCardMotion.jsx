@@ -12,6 +12,7 @@ const motionAllowed = () => typeof document.body.animate === 'function' && !wind
 const touchMotion = () => window.matchMedia('(pointer: coarse)').matches
 const cardPath = card => card.dataset.routeTarget || card.pathname + card.search
 const easing = 'cubic-bezier(.23,.65,.27,1)'
+const albumEasing = 'cubic-bezier(.28,.16,.27,1)'
 const clippedEasing = 'cubic-bezier(.38,.06,.24,1)'
 const floatingEasing = 'cubic-bezier(.26,.45,.25,1)'
 const openClip = 'inset(0px 0px 0px 0px)'
@@ -273,6 +274,38 @@ function alignedTitleTransform(copy, to) {
         : transform
 }
 
+function copyTitleAnchor(copy, pose) {
+    const range = document.createRange()
+    const text = copy.firstChild
+    const [first] = pose.text
+    range.setStart(text, 0)
+    range.setEnd(text, first.length)
+    const glyph = range.getBoundingClientRect()
+    if (!glyph.width || !glyph.height) return null
+    // Copies are initially translated and scaled to their own title boxes.
+    const { rect, layoutWidth, layoutHeight } = pose
+    return new DOMPoint((glyph.left - rect.left) * layoutWidth / rect.width,
+        (glyph.top - rect.top) * layoutHeight / rect.height)
+}
+
+function alignTitleTravel(label, sourceAnchor, source, target, targetAnchor, destination) {
+    const sourceMatrices = source.map(frame => new DOMMatrix(frame.transform))
+    const targetMatrices = destination.map(frame => new DOMMatrix(frame.transform))
+    const path = [sourceAnchor.matrixTransform(sourceMatrices[0]), targetAnchor.matrixTransform(targetMatrices[1])]
+    // Different line wraps and line heights put the glyphs at different
+    // offsets inside the two boxes. Move both from the same text anchor.
+    for (const [copy, anchor, frames, matrices] of [
+        [label, sourceAnchor, source, sourceMatrices], [target, targetAnchor, destination, targetMatrices],
+    ]) {
+        copy.style.transformOrigin = `${anchor.x}px ${anchor.y}px`
+        frames.forEach((frame, index) => {
+            const { x, y } = path[index]
+            const { a, b, c, d } = matrices[index]
+            frame.transform = `translate(${x - anchor.x}px, ${y - anchor.y}px) matrix(${a}, ${b}, ${c}, ${d}, 0, 0)`
+        })
+    }
+}
+
 function outlineTransform(from, to) {
     return `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${to.width / from.width}, ${to.height / from.height})`
 }
@@ -330,15 +363,20 @@ function handoffTitle(target, outgoing, live, reveal) {
 function animateTitles(layer, label, from, to, timing, reveal, atomicHandoff, clipped, preserveInk) {
     const destination = to.title
     const target = titleLayer(layer, destination)
+    const sourceAnchor = from.text === destination.text ? copyTitleAnchor(label, from) : null
+    const targetAnchor = sourceAnchor && copyTitleAnchor(target, destination)
     const scale = Number.parseFloat(destination.style.fontSize) / Number.parseFloat(from.style.fontSize)
     const sourceStart = titleTransform(from, from.rect)
     const sourceEnd = titleTransform(destination, destination.rect, scale)
     const targetStart = titleTransform(from, from.rect, 1 / scale)
     const targetEnd = atomicHandoff ? alignedTitleTransform(target, to) : landingTransform(to)
+    const sourceTravel = [{ transform: sourceStart }, { transform: sourceEnd }]
+    const targetTravel = [{ transform: targetStart }, { transform: targetEnd }]
+    if (sourceAnchor && targetAnchor) alignTitleTravel(label, sourceAnchor, sourceTravel, target, targetAnchor, targetTravel)
     const alpha = [0, .35, .75, 1].map((offset, index) => ({ opacity: Number(index >= 2), offset }))
     const motion = [
-        label.animate([{ transform: sourceStart }, { transform: sourceEnd }], timing),
-        target.animate([{ transform: targetStart }, { transform: targetEnd }], timing),
+        label.animate(sourceTravel, timing),
+        target.animate(targetTravel, timing),
         label.animate(alpha.map(({ opacity, offset }) => ({ opacity: 1 - opacity, offset })), timing),
         target.animate(alpha, timing),
     ]
@@ -441,7 +479,7 @@ function stageCard(main, from, returning, record) {
             const floating = clipped && marker === 'floating'
             const duration = floating ? floatingTravelMs : clipped ? clippedTravelMs
                 : earlyReturn ? cardReturnTravelMs : albumMorph ? albumCardTravelMs : cardTravelMs
-            const travel = { duration, fill: 'both', easing: floating ? floatingEasing : clipped ? clippedEasing : easing }
+            const travel = { duration, fill: 'both', easing: floating ? floatingEasing : clipped ? clippedEasing : albumMorph ? albumEasing : easing }
             const matchingTitle = label && matchingTitles(from.title, to?.title) && to.element
             const croppedCard = returning ? to : from
             const bounds = floating && croppedCard?.inlineBounds

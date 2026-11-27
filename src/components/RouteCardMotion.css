@@ -84,6 +84,7 @@ main[data-route-page-staged]:not([data-route-page-revealing]) .skeleton-shimmer 
 .route-card-title {
     inset: 0 auto auto 0;
     transform-origin: top left;
+    will-change: transform, opacity;
 }
 
 [data-route-title-landing] {
