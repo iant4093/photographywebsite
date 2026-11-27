@@ -1520,32 +1520,19 @@ async function slowAlbumTitleMotionCase(width, type) {
         if (video) await page.goto(origin + catalogPath)
         const card = page.locator(`.catalog-section [data-route-card="album"][href="${detailPath}"]`)
         await card.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
-        const checkWaitingTitle = async () => {
-            const pose = () => page.locator('main').evaluate(main => {
-                const stage = main.parentElement.querySelector('[data-route-card-morph]')
-                const title = stage?.querySelector('.route-card-title')
-                const cue = stage?.querySelector('.route-card-loading')
-                return {
-                    pageOpacity: Number(getComputedStyle(main).opacity),
-                    title: title?.getBoundingClientRect().toJSON(),
-                    titleVisible: title && getComputedStyle(title).visibility === 'visible',
-                    cueOpacity: cue ? Number(getComputedStyle(cue).opacity) : 0,
-                }
-            })
-            // Sample after the old skeleton reveal and again after the new cue.
-            await page.waitForTimeout(350)
-            const initial = await pose()
-            assert.ok(initial.titleVisible && initial.pageOpacity === 0 && initial.cueOpacity === 0,
-                'A short loading delay keeps the title visible without a skeleton flash')
-            await page.waitForTimeout(500)
-            const delayed = await pose()
-            assert.ok(delayed.titleVisible && delayed.pageOpacity === 0 && delayed.cueOpacity > 0,
-                'A longer wait adds a loading cue while the title stays visible')
-            assert.deepEqual(delayed.title, initial.title, 'The title stays in its departure position until it can move')
-        }
         await page.evaluate(() => {
             const main = document.getElementById('main-content')
             window.__visitor.albumTitleMotions = {}
+            new MutationObserver((_, observer) => {
+                const preview = document.querySelector('.route-card-preview')
+                if (!preview) return
+                observer.disconnect()
+                window.__visitor.previewTraveled = [...document.querySelectorAll('.route-card-title')].some(title =>
+                    title.getAnimations().some(animation => {
+                        const frames = animation.effect.getKeyframes()
+                        return frames[0].transform && frames[0].transform !== frames.at(-1).transform
+                    }))
+            }).observe(main.parentElement, { childList: true, subtree: true })
             new MutationObserver(() => {
                 const mode = main.dataset.routePageMotion
                 if (!mode) return
@@ -1560,11 +1547,22 @@ async function slowAlbumTitleMotionCase(width, type) {
         await card.click()
         await page.waitForURL(origin + detailPath)
         await detailRequest
-        await checkWaitingTitle()
+        const preview = page.locator('.route-card-preview h1:not([data-route-title-landing])')
+        await preview.waitFor({ state: 'visible', timeout: 3000 })
+        assert.equal(await preview.textContent(), album.title)
+        assert.equal(await page.evaluate(() => window.__visitor.previewTraveled), true, 'The title moves before the album response')
+        const parked = await preview.boundingBox()
+        const overlay = page.locator('[data-route-card-morph]')
+        assert.equal(await overlay.locator('.route-card-preview p').textContent(), album.description)
+        assert.doesNotMatch(await overlay.textContent(), /Loading album/i)
+        assert.equal(await page.locator('main').evaluate(main => getComputedStyle(main).opacity), '0', 'The skeleton stays hidden')
         releaseDetail()
-        await page.locator('.linen-gallery-header h1').waitFor()
+        const heading = page.locator('main .linen-gallery-header h1')
+        await heading.waitFor()
         await page.waitForFunction(() => 'enter' in window.__visitor.albumTitleMotions)
         await page.locator('main[data-route-page-motion]').waitFor({ state: 'detached' })
+        const landed = await heading.boundingBox()
+        assert.ok(Math.hypot(parked.x - landed.x, parked.y - landed.y) < 65, 'The preview hands off near the real album heading')
 
         // Expire the in-memory and stored catalog so history restoration must
         // wait for the cards to arrive again.
@@ -1580,7 +1578,9 @@ async function slowAlbumTitleMotionCase(width, type) {
         if (video) await page.getByRole('button', { name: 'Back to Videos' }).click()
         else await page.goBack()
         await catalogRequest
-        await checkWaitingTitle()
+        await overlay.locator('.route-card-progress').waitFor({ state: 'attached', timeout: 3000 })
+        assert.match(await overlay.textContent(), /^Album 1$/)
+        assert.equal(await page.locator('main').evaluate(main => getComputedStyle(main).opacity), '0', 'The catalog skeleton stays hidden')
         releaseCatalog()
         await card.waitFor()
         await page.waitForFunction(() => 'return' in window.__visitor.albumTitleMotions)
@@ -1832,6 +1832,25 @@ async function pageFadeCase(width) {
 
         // Use a nonzero offset that keeps the scroll-aware navbar visible.
         await sort.evaluate(control => control.blur())
+        await page.evaluate(() => scrollTo({ top: 38, behavior: 'instant' }))
+        await page.waitForFunction(() => Math.abs(scrollY - 38) <= 1)
+        if (!desktop) await page.getByRole('button', { name: 'Open menu' }).click()
+        const homeEntry = await page.evaluate(() => history.state.key)
+        await page.evaluate(() => {
+            const scroll = window.scrollTo
+            window.__visitor.restoreScrollSpy = () => { window.scrollTo = scroll }
+            window.scrollTo = function (options) {
+                if (options?.top === 0) window.__visitor.brandScrollBehavior = options.behavior
+                return scroll.apply(this, arguments)
+            }
+        })
+        await page.locator('.linen-brand').click()
+        await page.waitForFunction(() => scrollY === 0 && !document.documentElement.hasAttribute('data-menu-scroll-lock'))
+        assert.deepEqual(await page.evaluate(() => {
+            window.__visitor.restoreScrollSpy()
+            return [history.state.key, window.__visitor.brandScrollBehavior]
+        }), [homeEntry, 'smooth'], 'The Home brand scrolls to the top without navigating')
+
         await page.evaluate(() => scrollTo({ top: 38, behavior: 'instant' }))
         await page.waitForFunction(() => Math.abs(scrollY - 38) <= 1)
         if (!desktop) await page.getByRole('button', { name: 'Open menu' }).click()

@@ -175,6 +175,7 @@ export function watchScrollPosition({ key, historyKey, historyTraversal, route, 
     window.addEventListener('scroll', save, { passive: true })
     window.addEventListener('pagehide', pagehide)
     window.addEventListener('wheel', interrupt, { passive: true })
+    window.addEventListener('route-scroll-intent', interrupt)
     const stopWatchingTouch = watchTouchScroll(interrupt)
     window.addEventListener('keydown', interrupt)
     return () => {
@@ -190,6 +191,7 @@ export function watchScrollPosition({ key, historyKey, historyTraversal, route, 
         window.removeEventListener('scroll', save)
         window.removeEventListener('pagehide', pagehide)
         window.removeEventListener('wheel', interrupt)
+        window.removeEventListener('route-scroll-intent', interrupt)
         stopWatchingTouch()
         window.removeEventListener('keydown', interrupt)
     }

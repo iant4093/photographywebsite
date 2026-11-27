@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearRouteScrollPositions, watchScrollPosition } from './routeScroll'
+import { scrollToTop } from './navigation'
 
 describe('route scroll restoration', () => {
     let maximum, resize, stops
@@ -134,6 +135,22 @@ describe('route scroll restoration', () => {
         scroll(1540)
         frame()
         expect(window.scrollY).toBe(1540)
+        expect(document.documentElement.hasAttribute('data-route-scroll-restoring')).toBe(false)
+    })
+
+    it('yields to an explicit scroll to the top during history restoration', () => {
+        const leave = start({})
+        scroll(1600)
+        leave()
+        scroll(0)
+        start({ restore: true, historyTraversal: true })
+        frame()
+        expect(window.scrollY).toBe(1600)
+
+        scrollToTop()
+        window.dispatchEvent(new Event('scroll'))
+        frame()
+        expect(window.scrollY).toBe(0)
         expect(document.documentElement.hasAttribute('data-route-scroll-restoring')).toBe(false)
     })
 

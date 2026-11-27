@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { scrollToTop } from '../utils/navigation'
 
 export default function BackToTop() {
     const [isVisible, setIsVisible] = useState(false)
@@ -39,7 +40,7 @@ export default function BackToTop() {
     return (
         <button
             type="button"
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            onClick={scrollToTop}
             className="linen-back-to-top fixed bottom-6 right-6 z-50 p-4 rounded-full bg-charcoal/80 hover:bg-amber text-white shadow-warm-lg backdrop-blur-md transition-all duration-300 cursor-pointer group animate-scale-in"
             aria-label="Back to top"
         >

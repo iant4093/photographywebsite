@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useAuth } from '../context/auth'
 import useMediaQuery from '../hooks/useMediaQuery'
+import { scrollToTop } from '../utils/navigation'
 
 const NavDropdowns = lazy(() => import('./NavDropdowns'))
 
@@ -17,6 +18,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const navRef = useRef(null)
     const menuToggleRef = useRef(null)
     const menuRef = useRef(null)
+    const scrollHomeAfterMenu = useRef(false)
     // Hover dropdowns only load where the desktop links are shown to a pointer.
     const hoverDropdowns = useMediaQuery('(hover: hover) and (min-width: 1080px)')
     // On the narrowest phones the logo stands alone so the header icons fit on one line.
@@ -36,6 +38,14 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     })
     const menuLinkClass = (active) => `font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300${active ? ' is-active' : ''}`
     const closeMenu = () => setIsMenuOpen(false)
+    const handleBrandClick = (event) => {
+        if (pathname === '/' && event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+            event.preventDefault()
+            if (isMenuOpen) scrollHomeAfterMenu.current = true
+            else scrollToTop()
+        }
+        closeMenu()
+    }
     const primaryLinks = (
         <>
             <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
@@ -117,6 +127,10 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
             window.scrollTo({ ...scrollPosition, behavior: 'instant' })
             if (previousLock === null) root.removeAttribute('data-menu-scroll-lock')
             else root.setAttribute('data-menu-scroll-lock', previousLock)
+            if (scrollHomeAfterMenu.current) {
+                scrollHomeAfterMenu.current = false
+                scrollToTop()
+            }
         }
     }, [isMenuOpen])
 
@@ -144,7 +158,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                 <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <div className="linen-brand-cluster flex items-center gap-3 z-50 relative">
-                        <Link to="/" onClick={closeMenu} className="linen-brand flex items-center gap-3 group relative" aria-label={compactBrand ? 'Ian Truong, home' : undefined}>
+                        <Link to="/" onClick={handleBrandClick} className="linen-brand flex items-center gap-3 group relative" aria-label={compactBrand ? 'Ian Truong, home' : undefined}>
                             <div className="linen-logo-tile w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
                                 <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
                             </div>
