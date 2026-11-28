@@ -332,10 +332,20 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "IP",
                                     "ScopeDownStatement": {
-                                        "ByteMatchStatement": {
-                                            "SearchString": "d1twwtwfz1yeo4.cloudfront.net",
-                                            "FieldToMatch": {"SingleHeader": {"Name": "host"}},
-                                            "PositionalConstraint": "EXACTLY",
+                                        "OrStatement": {
+                                            "Statements": [
+                                                {"ByteMatchStatement": {
+                                                    "SearchString": "d1twwtwfz1yeo4.cloudfront.net",
+                                                    "FieldToMatch": {"SingleHeader": {"Name": "host"}},
+                                                    "PositionalConstraint": "EXACTLY",
+                                                }},
+                                                {"ByteMatchStatement": {
+                                                    "SearchString": "/media/",
+                                                    "FieldToMatch": {"UriPath": {}},
+                                                    "PositionalConstraint": "STARTS_WITH",
+                                                    "TextTransformations": [{"Priority": 0, "Type": "NORMALIZE_PATH"}],
+                                                }},
+                                            ],
                                         }
                                     },
                                 }
@@ -343,6 +353,14 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                         },
                         {"Name": "AWSManagedKnownBadInputs", "OverrideAction": {"None": {}}},
                         {"Name": "AWSManagedAmazonIpReputation", "OverrideAction": {"None": {}}},
+                        {
+                            "Name": "AWSManagedCoreRuleSetCount",
+                            "OverrideAction": {"Count": {}},
+                            "Statement": {"ManagedRuleGroupStatement": {
+                                "Name": "AWSManagedRulesCommonRuleSet",
+                                "VendorName": "AWS",
+                            }},
+                        },
                     ],
                 }
             },
@@ -408,8 +426,12 @@ class WafAndPreflightTests(unittest.TestCase):
     def test_waf_is_retained_selectively_blocking_and_privacy_safe(self) -> None:
         self.assertIn("Scope: CLOUDFRONT", WAF_TEMPLATE)
         self.assertIn("DefaultAction:\n        Allow: {}", WAF_TEMPLATE)
-        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 6)
-        self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 0)
+        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 7)
+        core = WAF_TEMPLATE.split("        - Name: AWSManagedCoreRuleSetCount", 1)[1].split("      Tags:", 1)[0]
+        self.assertIn("OverrideAction:\n            Count: {}", core)
+        self.assertIn("Name: AWSManagedRulesCommonRuleSet", core)
+        self.assertEqual(core.count("ActionToUse:"), core.count("Count: {}") - 1)
+        self.assertIn("Name: SizeRestrictions_BODY", core)
         self.assertEqual(WAF_TEMPLATE.count("None: {}"), 2)
         for rate_rule, aggregate_key, limit_parameter in (
             ("ExplorePerIpRateLimit", "IP", "ExplorePerIpRequestLimit"),
@@ -429,7 +451,7 @@ class WafAndPreflightTests(unittest.TestCase):
             1,
         )
         self.assertEqual(len(re.findall(r"(?m)^\s+SearchString: !Ref MediaHostName$", WAF_TEMPLATE)), 1)
-        self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: STARTS_WITH"), 1)
+        self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: STARTS_WITH"), 2)
         self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: EXACTLY"), 2)
         for managed_group in (
             "AWSManagedRulesKnownBadInputsRuleSet",

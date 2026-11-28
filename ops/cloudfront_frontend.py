@@ -34,6 +34,7 @@ FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
 # new limits, or every later frontend distribution run refuses.
 WAF_URI_PATH = {"UriPath": {}}
 WAF_HOST_HEADER = {"SingleHeader": {"Name": "host"}}
+PUBLIC_MEDIA_PATH = "/media/"
 WAF_RATE_LIMIT_CONTRACT = (
     ("ExplorePerIpRateLimit", "IP", 600, WAF_URI_PATH, "/api/public/explore", "EXACTLY"),
     ("ApiPerIpRateLimit", "IP", 3000, WAF_URI_PATH, "/api/", "STARTS_WITH"),
@@ -709,15 +710,32 @@ def validate_front_door_resources(
         "MediaPerIpRateLimit": ("Action", "Block"),
         "AWSManagedKnownBadInputs": ("OverrideAction", "None"),
         "AWSManagedAmazonIpReputation": ("OverrideAction", "None"),
+        "AWSManagedCoreRuleSetCount": ("OverrideAction", "Count"),
     }
     if set(actual_rules) != set(expected_actions) or any(
         action not in actual_rules[name].get(container, {})
         for name, (container, action) in expected_actions.items()
     ):
         raise SystemExit("Refusing front door: WAF selective-block rule contract differs")
+    core = actual_rules["AWSManagedCoreRuleSetCount"].get("Statement", {}).get("ManagedRuleGroupStatement", {})
+    if (core.get("Name"), core.get("VendorName")) != ("AWSManagedRulesCommonRuleSet", "AWS"):
+        raise SystemExit("Refusing front door: WAF Core Rule Set contract differs")
     for name, aggregate_key, limit, field, search, positional_constraint in WAF_RATE_LIMIT_CONTRACT:
         rate = actual_rules[name].get("Statement", {}).get("RateBasedStatement", {})
-        scope = rate.get("ScopeDownStatement", {}).get("ByteMatchStatement", {})
+        scope_down = rate.get("ScopeDownStatement", {})
+        scope = scope_down.get("ByteMatchStatement", {})
+        if name == "MediaPerIpRateLimit":
+            statements = scope_down.get("OrStatement", {}).get("Statements", [])
+            if len(statements) != 2:
+                raise SystemExit("Refusing front door: WAF media rate-limit scope differs")
+            scope, canonical = (statement.get("ByteMatchStatement", {}) for statement in statements)
+            if (
+                not waf_search_string_matches(canonical.get("SearchString"), PUBLIC_MEDIA_PATH)
+                or canonical.get("FieldToMatch") != WAF_URI_PATH
+                or canonical.get("PositionalConstraint") != "STARTS_WITH"
+                or canonical.get("TextTransformations") != [{"Priority": 0, "Type": "NORMALIZE_PATH"}]
+            ):
+                raise SystemExit("Refusing front door: WAF media rate-limit scope differs")
         if (
             rate.get("AggregateKeyType") != aggregate_key
             or rate.get("EvaluationWindowSec") != 300

@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 access point for the standalone public media origin on the frontend edge
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedPattern: '^[a-z0-9-]+$'
+  MediaBucket:
+    Type: String
+    AllowedPattern: '^[a-z0-9-]+$'
+  FrontendDistributionId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{12,20}$'
+
+Resources:
+  PublicMediaAccessPoint:
+    Type: AWS::S3::AccessPoint
+    Properties:
+      Bucket: !Ref MediaBucket
+      Name: !Sub 'ian-photography-public-media-${Stage}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Policy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowTaggedPublicMedia
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/ian-photography-public-media-${Stage}/object/albums/*'
+              - !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/ian-photography-public-media-${Stage}/object/fotomoto/*'
+              - !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/ian-photography-public-media-${Stage}/object/main-image/*'
+              - !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/ian-photography-public-media-${Stage}/object/site/hero/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistributionId}'
+                s3:ExistingObjectTag/visibility: public
+
+Outputs:
+  OriginDomain:
+    Description: Regional S3 REST endpoint using the access point alias
+    Value: !Sub '${PublicMediaAccessPoint.Alias}.s3.${AWS::Region}.amazonaws.com'

@@ -56,7 +56,7 @@ Parameters:
     Type: String
     Default: d1twwtwfz1yeo4.cloudfront.net
     AllowedPattern: '^[a-z0-9.-]+$'
-    Description: Exact Host header of the media CDN that the media rate rule counts.
+    Description: Exact Host header counted alongside the canonical public media path during migration.
 
 Rules:
   MustDeployInEdgeRegion:
@@ -139,15 +139,25 @@ Resources:
               EvaluationWindowSec: 300
               AggregateKeyType: IP
               ScopeDownStatement:
-                ByteMatchStatement:
-                  SearchString: !Ref MediaHostName
-                  FieldToMatch:
-                    SingleHeader:
-                      Name: host
-                  PositionalConstraint: EXACTLY
-                  TextTransformations:
-                    - Priority: 0
-                      Type: LOWERCASE
+                OrStatement:
+                  Statements:
+                    - ByteMatchStatement:
+                        SearchString: !Ref MediaHostName
+                        FieldToMatch:
+                          SingleHeader:
+                            Name: host
+                        PositionalConstraint: EXACTLY
+                        TextTransformations:
+                          - Priority: 0
+                            Type: LOWERCASE
+                    - ByteMatchStatement:
+                        SearchString: /media/
+                        FieldToMatch:
+                          UriPath: {}
+                        PositionalConstraint: STARTS_WITH
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NORMALIZE_PATH
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: MediaPerIpRateLimit
@@ -175,6 +185,87 @@ Resources:
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedAmazonIpReputationCount
+            SampledRequestsEnabled: false
+        - Name: AWSManagedCoreRuleSetCount
+          Priority: 40
+          # Count each rule to observe every match. The group-level override
+          # also keeps any newly introduced rule from blocking requests.
+          OverrideAction:
+            Count: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              RuleActionOverrides:
+                - Name: NoUserAgent_HEADER
+                  ActionToUse:
+                    Count: {}
+                - Name: UserAgent_BadBots_HEADER
+                  ActionToUse:
+                    Count: {}
+                - Name: SizeRestrictions_QUERYSTRING
+                  ActionToUse:
+                    Count: {}
+                - Name: SizeRestrictions_Cookie_HEADER
+                  ActionToUse:
+                    Count: {}
+                - Name: SizeRestrictions_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: SizeRestrictions_URIPATH
+                  ActionToUse:
+                    Count: {}
+                - Name: EC2MetaDataSSRF_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: EC2MetaDataSSRF_COOKIE
+                  ActionToUse:
+                    Count: {}
+                - Name: EC2MetaDataSSRF_URIPATH
+                  ActionToUse:
+                    Count: {}
+                - Name: EC2MetaDataSSRF_QUERYARGUMENTS
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericLFI_QUERYARGUMENTS
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericLFI_URIPATH
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericLFI_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: RestrictedExtensions_URIPATH
+                  ActionToUse:
+                    Count: {}
+                - Name: RestrictedExtensions_QUERYARGUMENTS
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericRFI_QUERYARGUMENTS
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericRFI_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericRFI_URIPATH
+                  ActionToUse:
+                    Count: {}
+                - Name: CrossSiteScripting_COOKIE
+                  ActionToUse:
+                    Count: {}
+                - Name: CrossSiteScripting_QUERYARGUMENTS
+                  ActionToUse:
+                    Count: {}
+                - Name: CrossSiteScripting_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: CrossSiteScripting_URIPATH
+                  ActionToUse:
+                    Count: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedCoreRuleSetCount
             SampledRequestsEnabled: false
       Tags:
         - Key: Application

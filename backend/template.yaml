@@ -1091,6 +1091,33 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+          - Sid: AllowFrontendPublicMediaAccessPoint
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource:
+              - !Sub '${ImagesBucket.Arn}/albums/*'
+              - !Sub '${ImagesBucket.Arn}/fotomoto/*'
+              - !Sub '${ImagesBucket.Arn}/main-image/*'
+              - !Sub '${ImagesBucket.Arn}/site/hero/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+                s3:DataAccessPointArn: !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/ian-photography-public-media-${Stage}'
+                s3:ExistingObjectTag/visibility: public
+          # The frontend also has a direct bucket grant for signed media.
+          # Explicitly deny untagged or private objects through the public origin.
+          - Sid: DenyNonPublicObjectsThroughPublicMediaAccessPoint
+            Effect: Deny
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${ImagesBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                s3:DataAccessPointArn: !Sub 'arn:${AWS::Partition}:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/ian-photography-public-media-${Stage}'
+              StringNotEquals:
+                s3:ExistingObjectTag/visibility: public
           - Sid: DenyCloudFrontTemporaryZipReads
             Effect: Deny
             Principal:

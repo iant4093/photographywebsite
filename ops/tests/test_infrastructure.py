@@ -1027,7 +1027,18 @@ class PrivateMediaEdgeTests(unittest.TestCase):
             "AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'",
             body,
         )
-        self.assertEqual(policy.count("distribution/EIOCCNR8XGQ1B"), 1)
+        public = policy.split("          - Sid: AllowFrontendPublicMediaAccessPoint", 1)[1]
+        public, deny = public.split("          - Sid: DenyNonPublicObjectsThroughPublicMediaAccessPoint", 1)
+        deny = deny.split("          - Sid:", 1)[0]
+        self.assertIn("distribution/EIOCCNR8XGQ1B", public)
+        self.assertIn("s3:DataAccessPointArn:", public)
+        self.assertIn("s3:ExistingObjectTag/visibility: public", public)
+        self.assertNotIn("/temp-zips/", public)
+        self.assertNotIn("/album-zips/", public)
+        self.assertIn("Effect: Deny", deny)
+        self.assertIn("s3:DataAccessPointArn:", deny)
+        self.assertIn("StringNotEquals:\n                s3:ExistingObjectTag/visibility: public", deny)
+        self.assertEqual(policy.count("distribution/EIOCCNR8XGQ1B"), 2)
 
     def test_cookie_signers_are_enabled_with_exact_key_parameter_access(self) -> None:
         # Delivery was switched on 2026-09-30 once the frontend private-media/*
