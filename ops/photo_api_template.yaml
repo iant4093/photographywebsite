@@ -199,6 +199,7 @@ Resources:
       ResourceArns:
         - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
         - !GetAtt WebAcl.Arn
+        - !Sub 'arn:${AWS::Partition}:route53:::hostedzone/${HostedZoneId}'
 
   Dns:
     Type: AWS::Route53::RecordSetGroup

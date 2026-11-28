@@ -38,21 +38,21 @@ parameter.
 
 The stack publishes these metrics under `IanTruongPhotography/Security`:
 
-| Metric | Source | Alarm (route) | Meaning |
-|---|---|---|---|
-| `AuditDenied` | all application audit denials | none; dashboard/query only | Normal at low volume; investigate if the baseline shifts. |
-| `AuditFailure` | audit records with failure outcome | `AuditFailureAlarm`, 1 in 5 minutes (record-only) | A security-sensitive operation or provider dispatch failed. |
-| `LoginDenied` | denied `auth.login` records | `LoginDeniedAlarm`, 10 in 5 minutes (record-only) | Possible credential attack, CAPTCHA problem or client regression. |
-| `ApiAuthorizationDenied` | API 401, 403 and 429 access logs | `ApiAuthorizationDeniedAlarm`, 25 in 5 minutes (record-only) | JWT, authorization or rate-limit failures, including denials before Lambda runs. |
-| `FrontDoorDenied` | `front_door_request_denied` log records | `FrontDoorDeniedAlarm`, 10 in 5 minutes (record-only) | Requests reached the origin without a valid CloudFront origin header. |
+| Metric | Source | Meaning |
+|---|---|---|
+| `AuditDenied` | all application audit denials | Normal at low volume; investigate if the baseline shifts. |
+| `AuditFailure` | audit records with failure outcome | A security-sensitive operation or provider dispatch failed. |
+| `LoginDenied` | denied `auth.login` records | Possible credential attack, CAPTCHA problem or client regression. |
+| `ApiAuthorizationDenied` | API 401, 403 and 429 access logs | JWT, authorization or rate-limit failures, including denials before Lambda runs. |
+| `FrontDoorDenied` | `front_door_request_denied` log records | Requests reached the origin without a valid CloudFront origin header. |
 
-None of these alarms send email. Email goes only to the signals listed in
+View these metrics in CloudWatch. Email goes to the signals listed in
 [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md#email-routing-policy): site down, data
 at risk, root account use and budget overrun.
 
 Alarms that notify publish to the `ian-photography-security-<stage>` topic,
 which lives in the separate notification stack. Its policy accepts only the
-names of alarms that are meant to email. Record-only alarms have no actions.
+names of alarms that are meant to email.
 The application stack does not create its own topic or subscription.
 `alarm_registry.json` is the source of truth for each alarm's route.
 

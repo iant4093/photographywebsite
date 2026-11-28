@@ -273,23 +273,10 @@ class OriginalInfrastructureTests(unittest.TestCase):
         policy = (OPS / "security_notifications_template.yaml").read_text(encoding="utf-8")
         self.assertIn("alarm:ian-website-OriginalComparisonFailureAlarm-*'", policy)
 
-    def test_index_failures_have_a_scoped_native_alarm_and_documented_recovery(self):
-        alarm = self.resources["OriginalIndexRefreshErrorsAlarm"]["Properties"]
-        self.assertEqual(alarm["Namespace"], "AWS/Lambda")
-        self.assertEqual(alarm["MetricName"], "Errors")
-        self.assertEqual(alarm["Dimensions"], [{"Name": "FunctionName", "Value": {"Ref": "OriginalIndexRefreshFunction"}}])
-        self.assertEqual(alarm["Statistic"], "Sum")
-        self.assertLessEqual(alarm["Period"], 900)
-        self.assertEqual(alarm["Threshold"], 1)
-        self.assertEqual(alarm["TreatMissingData"], "notBreaching")
-        # Record-only: a failed index refresh leaves existing comparisons available.
-        self.assertNotIn("AlarmActions", alarm)
-        registry = json.loads((OPS / "alarm_registry.json").read_text(encoding="utf-8"))
-        groups = [group for group in registry["groups"] if "OriginalIndexRefreshErrorsAlarm" in group["logicalResourceIds"]]
-        self.assertEqual(len(groups), 1)
-        self.assertEqual(groups[0]["route"], "cloudwatch-audit-only")
+    def test_index_refresh_errors_have_documented_recovery(self):
+        self.assertNotIn("OriginalIndexRefreshErrorsAlarm", self.resources)
         recovery = (OPS / "ALARM_REGISTRY.md").read_text(encoding="utf-8")
-        self.assertIn("OriginalIndexRefreshErrorsAlarm", recovery)
+        self.assertIn("original-index errors", recovery)
         self.assertIn("PHOTO_ORIGINAL_COMPARISONS.md#failure-recovery-and-retention", recovery)
 
     def test_per_function_packages_include_local_access_dependency_without_archive_reader(self):

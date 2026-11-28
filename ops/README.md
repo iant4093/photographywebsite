@@ -276,8 +276,10 @@ as a fallback for legacy records. Public albums with an unknown date stay
 eligible for prebuilding.
 
 Older public albums build ZIPs when requested. Their generated archives are
-reusable for 30 days. Hourly reconciliation queues expiration once the
-10-minute lifetime of any outstanding download link has also elapsed. The
+reusable for 30 days. Hourly reconciliation still repairs missing prebuilt
+archives. It starts an expired-archive cleanup sweep no more than every six
+hours and only queues expiration after the 10-minute lifetime of outstanding
+download links has elapsed. The
 worker uses the same per-album FIFO queue as builds and rechecks the current
 album and object timestamps before deleting an expired ZIP. S3 retains the
 noncurrent version for one day. The source media and the existing

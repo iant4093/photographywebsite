@@ -259,9 +259,9 @@ been applied.
 
 `OriginalComparisonFailureAlarm` fires when the comparison DLQ has a visible
 message and notifies the `ian-photography-security-<stage>` SNS topic.
-`OriginalIndexRefreshErrorsAlarm` reports indexer errors and is record-only,
-since existing comparisons keep working. Review aggregate errors, durations,
-throttles, queue age and index freshness before changing any configuration.
+Existing comparisons keep working during an index refresh failure. Review the
+index refresh Lambda errors, durations, throttles, queue age and index freshness
+before changing any configuration.
 
 If indexing fails, check access to the SSM parameter, the optional KMS decrypt
 permission, the service account's read access to the configured root, Drive

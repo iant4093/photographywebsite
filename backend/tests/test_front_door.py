@@ -278,19 +278,14 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         self.assertNotIn("QueueConfigurations:", bucket)
         self.assertNotIn("TopicConfigurations:", bucket)
 
-    def test_privacy_safe_denials_are_metricized_and_alarmable(self) -> None:
+    def test_privacy_safe_denials_are_metricized(self) -> None:
         blocks = _resource_blocks()
         metric_filter = blocks["FrontDoorDeniedMetricFilter"]
-        alarm = blocks["FrontDoorDeniedAlarm"]
         self.assertIn("LogGroupName: !Ref ApplicationLogGroup", metric_filter)
         self.assertIn("FilterPattern: '\"front_door_request_denied\"'", metric_filter)
         self.assertIn("MetricName: FrontDoorDenied", metric_filter)
-        self.assertIn("Namespace: IanTruongPhotography/Security", alarm)
-        self.assertIn("MetricName: FrontDoorDenied", alarm)
-        self.assertIn("Threshold: 10", alarm)
-        # Record-only: a denied direct-origin request means the guard works.
-        self.assertNotIn("AlarmActions:", alarm)
-        self.assertNotIn("ian-photography-security-${Stage}", alarm)
+        self.assertIn("MetricNamespace: IanTruongPhotography/Security", metric_filter)
+        self.assertNotIn("FrontDoorDeniedAlarm", blocks)
 
 
 if __name__ == "__main__":

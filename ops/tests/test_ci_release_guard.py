@@ -333,11 +333,7 @@ class ReleaseIntentTests(unittest.TestCase):
         self.assertEqual({rule["logicalId"] for rule in alarm_rules}, alarm_ids)
         for rule in alarm_rules:
             self.assertEqual(rule["action"], "Modify")
-            expected_paths = (
-                ["AlarmActions", "AlarmDescription", "Threshold"]
-                if rule["logicalId"] == "FrontDoorDeniedAlarm"
-                else ["AlarmActions"]
-            )
+            expected_paths = ["AlarmActions"]
             if rule["logicalId"] == "ApiServerErrorAlarm":
                 expected_paths.append("MetricName")
             self.assertEqual(rule["propertyPaths"], expected_paths)
@@ -443,7 +439,6 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("AlbumWorkWorkerFunctionRole", "AWS::IAM::Role"),
                 ("AlbumWorkWorkerFunctionAlbumWorkRequests", "AWS::Lambda::EventSourceMapping"),
                 ("AlbumWorkDeadLetterQueueAlarm", "AWS::CloudWatch::Alarm"),
-                ("AlbumWorkQueueAgeAlarm", "AWS::CloudWatch::Alarm"),
                 ("HeroReelFunction", "AWS::Lambda::Function"),
                 ("HeroReelFunctionRole", "AWS::IAM::Role"),
                 ("HeroReelFunctionReconcile", "AWS::Events::Rule"),
@@ -559,16 +554,12 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("HoverPreviewManifestBuilderFunctionBoundedReconciliation", "AWS::Events::Rule"),
                 ("HoverPreviewManifestBuilderFunctionBoundedReconciliationPermission", "AWS::Lambda::Permission"),
                 ("HoverPreviewManifestFailureMetricFilter", "AWS::Logs::MetricFilter"),
-                ("HoverPreviewRefreshQueueAgeAlarm", "AWS::CloudWatch::Alarm"),
-                ("HoverPreviewManifestBuilderErrorsAlarm", "AWS::CloudWatch::Alarm"),
-                ("HoverPreviewManifestFailureAlarm", "AWS::CloudWatch::Alarm"),
                 ("OriginalComparisonTable", "AWS::DynamoDB::Table"),
                 ("OriginalPreviewBucket", "AWS::S3::Bucket"),
                 ("OriginalPreviewBucketPolicy", "AWS::S3::BucketPolicy"),
                 ("OriginalComparisonDeadLetterQueue", "AWS::SQS::Queue"),
                 ("OriginalComparisonQueue", "AWS::SQS::Queue"),
                 ("OriginalComparisonFailureAlarm", "AWS::CloudWatch::Alarm"),
-                ("OriginalIndexRefreshErrorsAlarm", "AWS::CloudWatch::Alarm"),
                 ("OriginalIndexRefreshFunction", "AWS::Lambda::Function"),
                 ("OriginalIndexRefreshFunctionRole", "AWS::IAM::Role"),
                 ("OriginalComparisonWorkerFunction", "AWS::Lambda::Function"),
@@ -588,7 +579,7 @@ class ReleaseIntentTests(unittest.TestCase):
 
         self.assertEqual(
             {(rule["logicalId"], rule["resourceType"]) for rule in document["rules"] if rule["action"] == "Remove"},
-            set(release_guard.PRINT_REMOVALS),
+            set(release_guard.APPROVED_REMOVALS),
         )
 
     def test_print_removal_requires_exact_intent_and_confirmed_secret_retention(self):
@@ -614,6 +605,23 @@ class ReleaseIntentTests(unittest.TestCase):
                 release_guard.gate_change_set([{"Changes": [{"ResourceChange": resource}]}], release_intent=intent)
         with self.assertRaises(release_guard.GateError):
             release_guard.gate_change_set([{"Changes": [{"ResourceChange": secret}]}])
+
+    def test_diagnostic_alarm_retirement_preserves_required_alarms(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        resources = [
+            {"Action": "Remove", "LogicalResourceId": name, "ResourceType": kind, "PolicyAction": "Delete"}
+            for name, kind in release_guard.DIAGNOSTIC_ALARM_REMOVALS
+        ]
+        result = release_guard.gate_change_set(
+            [{"Changes": [{"ResourceChange": resource} for resource in resources]}], release_intent=intent
+        )
+        self.assertEqual(result["Remove"], 19)
+        for name in ("ApiServerErrorAlarm", "PreviewDeadLetterQueueAlarm", "AlbumWorkDeadLetterQueueAlarm"):
+            resource = {"Action": "Remove", "LogicalResourceId": name, "ResourceType": "AWS::CloudWatch::Alarm"}
+            with self.subTest(name=name), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set([{"Changes": [{"ResourceChange": resource}]}], release_intent=intent)
 
     def test_private_media_edge_release_is_bounded_to_reviewed_changes(self):
         intent = release_guard.load_release_intent(json.loads(

@@ -265,7 +265,7 @@ class RefreshTests(unittest.TestCase):
             refresh.refresh_album(ALBUM_ID)
             archives.assert_not_called()
             enqueue.assert_not_called()
-            refresh.refresh_album(ALBUM_ID, request_id="hour", reconcile=True)
+            refresh.refresh_album(ALBUM_ID, request_id="hour", expire_archives=True)
             enqueue.assert_called_once_with(ALBUM_ID, cold, request_id="hour", expire=True)
 
     def test_reconciliation_paginates_existing_albums_and_persists_cursor_after_enqueue(self):
@@ -279,6 +279,40 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(enqueue.call_args.args, (ALBUM_ID,))
         self.assertEqual(json.loads(s3.put_object.call_args.kwargs["Body"]), {"albumId": ALBUM_ID})
         self.assertEqual(resource.Table.return_value.scan.call_args.kwargs["Limit"], 100)
+
+    def test_hourly_repair_checks_every_page_and_carries_cleanup_through_the_sweep(self):
+        resource, s3 = Mock(), Mock()
+        scan = resource.Table.return_value.scan
+        now = 36_000
+        cursor = {"albumId": ALBUM_ID}
+
+        def run_page(at, saved_cursor, metadata, next_cursor):
+            s3.get_object.return_value = {
+                "Body": io.BytesIO(json.dumps(saved_cursor).encode()),
+                "Metadata": metadata,
+            }
+            scan.return_value = {"Items": [{"albumId": ALBUM_ID}], "LastEvaluatedKey": next_cursor}
+            with patch.object(refresh.time, "time", return_value=at):
+                refresh.handler({}, None)
+            return s3.put_object.call_args.kwargs["Metadata"]
+
+        with patch.object(refresh.boto3, "resource", return_value=resource), patch.object(
+            refresh, "s3", s3
+        ), patch.object(refresh, "object_metadata", return_value={"Key": refresh.CURSOR_KEY}), patch.object(
+            refresh, "refresh_album"
+        ) as repair:
+            metadata = run_page(now, None, {}, cursor)
+            repair.assert_called_with(ALBUM_ID, request_id="reconcile:10", expire_archives=True)
+
+            metadata = run_page(now + 3600, cursor, metadata, None)
+            repair.assert_called_with(ALBUM_ID, request_id="reconcile:11", expire_archives=True)
+            self.assertEqual(scan.call_args.kwargs["ExclusiveStartKey"], cursor)
+
+            metadata = run_page(now + 7200, None, metadata, None)
+            repair.assert_called_with(ALBUM_ID, request_id="reconcile:12", expire_archives=False)
+
+            run_page(now + refresh.ARCHIVE_CLEANUP_INTERVAL, None, metadata, None)
+            repair.assert_called_with(ALBUM_ID, request_id="reconcile:16", expire_archives=True)
 
     def test_reconciliation_resumes_cursor_and_does_not_skip_a_failed_page(self):
         resource, s3 = Mock(), Mock()

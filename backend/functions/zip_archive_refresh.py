@@ -18,14 +18,15 @@ from zip_jobs import album_archives, enqueue_zip, object_metadata
 s3 = boto3.client("s3")
 logger = logging.getLogger("photography_api.zip_refresh")
 CURSOR_KEY = "temp-zips/zip-reconciliation.json"
+ARCHIVE_CLEANUP_INTERVAL = 6 * 60 * 60
 
 
-def refresh_album(album_id, *, request_id=None, reconcile=False):
+def refresh_album(album_id, *, request_id=None, expire_archives=False):
     album = get_album_record(album_id=album_id)
     if album and (album.get("status", "active") != "active" or album.get("createdBySub")):
         return
     if album and is_on_demand_zip(album):
-        if reconcile and any(
+        if expire_archives and any(
             zip_archive_expired(archive, grace_seconds=ZIP_LINK_SECONDS)
             for archive in album_archives(s3, bucket_name(), album_id)
         ):
@@ -40,25 +41,40 @@ def refresh_album(album_id, *, request_id=None, reconcile=False):
 
 def _reconcile():
     params = {"Limit": 100, "ProjectionExpression": "albumId"}
+    cursor = None
+    cleanup_started_at = 0
+    expire_archives = False
+    now = int(time.time())
     if object_metadata(s3, bucket_name(), CURSOR_KEY):
         response = s3.get_object(Bucket=bucket_name(), Key=CURSOR_KEY)
         try:
             cursor = json.loads(response["Body"].read())
         finally:
             response["Body"].close()
-        if cursor:
-            params["ExclusiveStartKey"] = cursor
+        metadata = response.get("Metadata", {})
+        cleanup_started_at = int(metadata.get("cleanup-started-at", "0"))
+        expire_archives = metadata.get("expire-archives") == "true"
+    if cursor:
+        params["ExclusiveStartKey"] = cursor
+    if not cursor or not cleanup_started_at:
+        expire_archives = now - cleanup_started_at >= ARCHIVE_CLEANUP_INTERVAL
+        if expire_archives:
+            cleanup_started_at = now
+
     page = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"]).scan(**params)
     for item in page.get("Items", []):
         try:
             album_id = validate_uuid(item.get("albumId"))
         except ValidationError:
             continue
-        refresh_album(album_id, request_id=f"reconcile:{int(time.time()) // 3600}", reconcile=True)
+        refresh_album(album_id, request_id=f"reconcile:{now // 3600}", expire_archives=expire_archives)
     s3.put_object(
         Bucket=bucket_name(), Key=CURSOR_KEY,
+        # Keep the cursor body compatible with older workers during a rollback.
         Body=json.dumps(page.get("LastEvaluatedKey")),
-        ContentType="application/json", Tagging="visibility=private",
+        ContentType="application/json",
+        Tagging="visibility=private",
+        Metadata={"cleanup-started-at": str(cleanup_started_at), "expire-archives": str(expire_archives).lower()},
     )
     return {"checked": len(page.get("Items", [])), "hasMore": bool(page.get("LastEvaluatedKey"))}
 

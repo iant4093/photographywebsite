@@ -249,10 +249,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "HoverPreviewManifestBuilderErrorsAlarm",
             "HoverPreviewManifestFailureAlarm",
         ):
-            alarm = resource_block(logical_id)
-            self.assertIn("TreatMissingData: notBreaching", alarm)
-            # Record-only: the refresh queue's DLQ is the emailing data-loss signal.
-            self.assertNotIn("AlarmActions:", alarm)
+            self.assertNotIn(f"  {logical_id}:", TEMPLATE)
 
         self.assertIn("Album hover-preview manifests", RUNBOOK)
         self.assertIn("HOVER_PREVIEW_MANIFESTS.md", RUNBOOK)
@@ -356,9 +353,7 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
             "PreviewWorkerThrottleAlarm",
             "PreviewMetadataThrottleAlarm",
         ):
-            block = resource_block(logical_id)
-            self.assertNotIn("AlarmActions:", block)
-            self.assertIn("TreatMissingData: notBreaching", block)
+            self.assertNotIn(f"  {logical_id}:", TEMPLATE)
 
     def test_backfill_uses_guarded_direct_queue_dispatch(self) -> None:
         self.assertNotIn("AWS::StepFunctions::StateMachine", TEMPLATE)

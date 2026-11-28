@@ -124,7 +124,7 @@ The [Miro architecture board](https://miro.com/app/board/uXjVEYlOMic=/) has thre
 ### Monitoring and alerts
 
 - CloudWatch alarms that send email: server errors on the site, API or media CDN; background jobs in dead-letter queues; stale or failed backups; root account activity. AWS Budgets sends an email when actual or forecasted monthly spend goes over its limit.
-- About 25 other alarms are recorded on dashboards without sending email.
+- CloudWatch retains diagnostic metrics and logs for investigation. The public Photo API also has a download-spike alarm.
 - CloudTrail, AWS Config, GuardDuty, Security Hub and IAM Access Analyzer cover the account. AWS Backup takes daily backups of the albums and preview metadata DynamoDB tables and keeps them for 35 days. All DynamoDB tables have point-in-time recovery enabled.
 
 ### Cost controls

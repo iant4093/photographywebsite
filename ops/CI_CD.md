@@ -113,8 +113,9 @@ recorded in the change set description that later steps check.
 
 Backend planning requires the stack to be `IN_SYNC` in a drift check, keeps
 every current stack parameter with `UsePreviousValue`, and creates a change set
-without executing it. `release_guard.py` permits only the specific removals
-documented in the [print cutover](PICTOREM_PRINTS.md#cutover). It rejects
+without executing it. `release_guard.py` permits only the exact diagnostic
+alarm retirements and the removals documented in the
+[print cutover](PICTOREM_PRINTS.md#cutover). It rejects
 replacements and recreations other than reviewed dependency cascades, changes outside
 `ops/ci/release_intent.json`, protected-resource changes not approved by an
 intent rule, and stacks that fail its stack checks

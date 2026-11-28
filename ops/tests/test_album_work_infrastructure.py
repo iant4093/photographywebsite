@@ -75,11 +75,10 @@ class AlbumWorkInfrastructureTests(unittest.TestCase):
         self.assertEqual(self.resources['CacheInvalidationQueue']['Properties']['VisibilityTimeout'], 6 * 30 + 10)
         registry = json.loads((ROOT / 'ops/alarm_registry.json').read_text())
         registered = {name for group in registry['groups'] for name in group['logicalResourceIds']}
-        for alarm in ('AlbumWorkDeadLetterQueueAlarm', 'AlbumWorkQueueAgeAlarm'):
-            self.assertIn(alarm, registered)
-        # Only the DLQ (data at risk) emails; queue age is a record-only diagnostic.
+        self.assertIn('AlbumWorkDeadLetterQueueAlarm', registered)
+        self.assertNotIn('AlbumWorkQueueAgeAlarm', registered)
         self.assertEqual(self.resources['AlbumWorkDeadLetterQueueAlarm']['Properties']['AlarmActions'], self.resources['AsyncFailureQueueAlarm']['Properties']['AlarmActions'])
-        self.assertNotIn('AlarmActions', self.resources['AlbumWorkQueueAgeAlarm']['Properties'])
+        self.assertNotIn('AlbumWorkQueueAgeAlarm', self.resources)
 
     def test_new_release_rules_allow_only_exact_adds_and_queue_timeout_change(self):
         from ops.ci import release_guard
@@ -87,7 +86,7 @@ class AlbumWorkInfrastructureTests(unittest.TestCase):
         added = [('AlbumWorkQueue', 'AWS::SQS::Queue'), ('AlbumWorkDeadLetterQueue', 'AWS::SQS::Queue'),
                  ('AlbumWorkWorkerFunction', 'AWS::Lambda::Function'), ('AlbumWorkWorkerFunctionRole', 'AWS::IAM::Role'),
                  ('AlbumWorkWorkerFunctionAlbumWorkRequests', 'AWS::Lambda::EventSourceMapping'),
-                 ('AlbumWorkDeadLetterQueueAlarm', 'AWS::CloudWatch::Alarm'), ('AlbumWorkQueueAgeAlarm', 'AWS::CloudWatch::Alarm')]
+                 ('AlbumWorkDeadLetterQueueAlarm', 'AWS::CloudWatch::Alarm')]
         for name, kind in added:
             rules = [r for r in intent['rules'] if r['logicalId'] == name and r['action'] == 'Add']
             self.assertEqual(rules, [{'logicalId': name, 'resourceType': kind, 'action': 'Add', 'propertyPaths': [], 'allowNoDetails': True}])

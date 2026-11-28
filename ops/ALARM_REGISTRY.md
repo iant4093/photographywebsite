@@ -10,7 +10,6 @@ The routes are:
 - `security-notification-topic-via-cross-region-validated-signal-queue`: the
   `us-east-1` edge alarms, forwarded to the home Region and validated before
   publishing
-- `cloudwatch-audit-only`: record-only, no action
 - `aws-budgets-owner-email-when-configured`: AWS Budgets email to the optional
   `BudgetAlertEmail` address
 
@@ -28,10 +27,9 @@ is recorded every 90 days (`testIntervalDays`) and after any routing change.
 ## Email routing policy
 
 Email is sent for four outcomes: the site is down, data is at risk, the account
-may be compromised, or spend is over budget. In `us-west-2`, 9 CloudWatch alarms
-publish to the topic, and the 25 other alarms there are record-only
-(`cloudwatch-audit-only`). Record-only alarms stay in CloudWatch for dashboards
-and investigation. The routing uses no composite alarms or health checks.
+may be compromised, or spend is over budget. In `us-west-2`, 11 CloudWatch alarms
+publish to the topic. Diagnostic metrics and logs are available for
+investigation. The routing uses no composite alarms or health checks.
 
 | Outcome | Signals that email |
 | --- | --- |
@@ -69,8 +67,8 @@ request URLs, credentials, provider errors or log messages.
 Compare API 5xx and latency with Lambda errors, throttles and duration for the
 live release. Check a small public request before rolling back. Do not turn on
 body or query logging to debug an API failure. Only `ApiServerErrorAlarm` (5 or
-more 5xx responses in 5 minutes) emails. `ApiLatencyAlarm` (p95 integration
-latency) is record-only.
+more 5xx responses in 5 minutes) emails. Review API Gateway p95 integration
+latency in CloudWatch.
 
 ## Front-door denial
 
@@ -82,7 +80,7 @@ CloudFront, treat that as critical. Rotate the origin verifier only with its
 dual-version runbook in [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md). That is
 separate from provider credential rotation.
 
-`FrontDoorDeniedAlarm` is record-only. Denied direct-origin requests mean the
+Review the `FrontDoorDenied` metric. Denied direct-origin requests mean the
 check is working.
 
 ## Application async and preview
@@ -93,9 +91,9 @@ dispatch or the event source mapping.
 
 Only the dead-letter alarms email: async failure, preview, ZIP,
 original-comparison and album-work DLQs. A message there has exhausted its
-retries. The rest use this procedure but are record-only diagnostics: queue
-age, preview queue depth, worker failure, error, duration and throttle,
-metadata system-error and throttle, hover-preview and original-index alarms.
+retries. Use the queue age and depth, worker failure, error, duration and
+throttle, metadata error and throttle, and hover-preview and original-index
+metrics to investigate.
 Retries and the DLQs catch messages that fail.
 
 The same rules apply to the queues behind `ZipPreparationFailureAlarm` and the
@@ -108,7 +106,7 @@ check one immutable manifest through the public alias. Leave the album-detail
 fallback path on until catalog reconciliation is done and the refresh queue has
 no old messages.
 
-For `OriginalComparisonFailureAlarm` and `OriginalIndexRefreshErrorsAlarm`,
+For `OriginalComparisonFailureAlarm` and original-index errors,
 compare comparison DLQ depth and worker errors with the private index's age.
 Follow [photo-original failure recovery](PHOTO_ORIGINAL_COMPARISONS.md#failure-recovery-and-retention)
 to check the read-only Drive boundary, and retry only website jobs known to be
@@ -121,15 +119,15 @@ indexing outage.
 Group denials by stable reason, route template, status and release. Decide
 whether it is a client or session regression or abuse, without enumerating
 accounts. Leave CAPTCHA, rate limits, JWT validation and the owner, admin and
-share boundaries unchanged. `LoginThrottleAlarm`, `LoginDeniedAlarm` and
-`ApiAuthorizationDeniedAlarm` are record-only.
+share boundaries unchanged. Review Login Lambda throttles and the
+`LoginDenied` and `ApiAuthorizationDenied` metrics in CloudWatch.
 
 ## Application audit failure
 
 Send one synthetic success and one denial, and check that the central log group
 and metric filters pick them up. Audit logging does not block the user's
 action, so an audit outage stays open until event delivery and the
-forbidden-field tests pass. `AuditFailureAlarm` is record-only.
+forbidden-field tests pass. Review the `AuditFailure` metric in CloudWatch.
 
 ## Account identity and encryption change
 

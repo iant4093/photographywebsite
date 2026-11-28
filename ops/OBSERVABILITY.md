@@ -32,8 +32,9 @@ API Gateway detailed route metrics are off (`DetailedMetricsEnabled: false` in
 HTTP API error alarm uses the metric name `5xx`; `5XXError` is the REST API
 metric name.
 
-Application custom metrics, operational alarms, and audit logs stay on. Traffic
-and error alarms treat missing data as not breaching. The backup freshness alarm
+Use application custom metrics and audit logs for diagnostics. Operational
+alarms cover outages, exhausted retries, backup freshness and critical security
+signals. Traffic and error alarms treat missing data as not breaching. The backup freshness alarm
 is the exception: it treats missing data as breaching.
 
 ## What Site Health reads

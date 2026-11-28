@@ -22,26 +22,6 @@
       "autoClose": "CloudWatch metric state only"
     },
     {
-      "id": "application-api-latency",
-      "logicalResourceIds": [
-        "ApiLatencyAlarm"
-      ],
-      "severity": "diagnostic",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
-      "autoClose": "CloudWatch metric state only"
-    },
-    {
-      "id": "front-door-denial",
-      "logicalResourceIds": [
-        "FrontDoorDeniedAlarm"
-      ],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#front-door-denial",
-      "autoClose": "CloudWatch metric state only"
-    },
-    {
       "id": "application-async-and-preview",
       "logicalResourceIds": [
         "AsyncFailureQueueAlarm",
@@ -54,50 +34,6 @@
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
       "autoClose": "CloudWatch metric state only; messages are never automatically deleted or redriven"
-    },
-    {
-      "id": "application-operational-diagnostics",
-      "logicalResourceIds": [
-        "PreviewQueueAgeAlarm",
-        "PreviewQueueDepthAlarm",
-        "PreviewWorkerFailureAlarm",
-        "PreviewWorkerErrorsAlarm",
-        "PreviewWorkerDurationAlarm",
-        "PreviewWorkerThrottleAlarm",
-        "PreviewMetadataSystemErrorsAlarm",
-        "PreviewMetadataThrottleAlarm",
-        "HoverPreviewRefreshQueueAgeAlarm",
-        "HoverPreviewManifestBuilderErrorsAlarm",
-        "HoverPreviewManifestFailureAlarm",
-        "OriginalIndexRefreshErrorsAlarm",
-        "AlbumWorkQueueAgeAlarm"
-      ],
-      "severity": "diagnostic",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
-      "autoClose": "CloudWatch metric state only"
-    },
-    {
-      "id": "authentication-and-authorization",
-      "logicalResourceIds": [
-        "LoginThrottleAlarm",
-        "LoginDeniedAlarm",
-        "ApiAuthorizationDeniedAlarm"
-      ],
-      "severity": "diagnostic",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#authentication-and-authorization",
-      "autoClose": "CloudWatch metric state only"
-    },
-    {
-      "id": "application-audit-failure",
-      "logicalResourceIds": [
-        "AuditFailureAlarm"
-      ],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#application-audit-failure",
-      "autoClose": "CloudWatch metric state only; incident disposition remains open until logging is proven"
     },
     {
       "id": "account-root-activity",

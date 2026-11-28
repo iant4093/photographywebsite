@@ -349,7 +349,7 @@ class DataProtectionTests(unittest.TestCase):
             self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
 
-    def test_application_audit_logs_are_centralized_retained_and_alarmable(self) -> None:
+    def test_application_audit_logs_are_centralized_retained_and_metricized(self) -> None:
         group = resource_block("ApplicationLogGroup")
         self.assertIn("RetentionInDays: !Ref ApplicationLogRetentionDays", group)
         self.assertIn("DataClassification", group)
@@ -365,12 +365,7 @@ class DataProtectionTests(unittest.TestCase):
         ):
             self.assertIn("AWS::Logs::MetricFilter", resource_block(logical_id))
         for logical_id in ("AuditFailureAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"):
-            block = resource_block(logical_id)
-            self.assertIn("IanTruongPhotography/Security", block)
-        # Audit and denial alarms are record-only; they never email.
-        for logical_id in ("AuditFailureAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"):
-            self.assertNotIn("AlarmActions:", resource_block(logical_id))
-            self.assertNotIn("ian-photography-security-${Stage}", resource_block(logical_id))
+            self.assertNotIn(f"  {logical_id}:", TEMPLATE)
 
     def test_api_access_log_destination_uses_exact_log_group_arn(self) -> None:
         api = resource_block("Api")

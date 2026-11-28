@@ -11,7 +11,7 @@ class PerformanceDependencyTests(unittest.TestCase):
         dependencies=release_guard.load_release_dependencies(json.loads((ROOT/'ops/ci/release_dependencies.json').read_text()))
         intent=release_guard.load_release_intent(json.loads((ROOT/'ops/ci/release_intent.json').read_text()))
         reviewed=json.loads((ROOT/'ops/tests/fixtures/performance_tag_dependencies.json').read_text())['reviewed']
-        self.assertEqual(len(reviewed),47)
+        self.assertEqual(len(reviewed),43)
         for item in reviewed:
             logical=item['logicalId'];prop=item['propertyPath'];cause=item['cause']
             keys=[key for key,causes in dependencies.items() if key[0]==logical and key[2]==prop and cause in causes]

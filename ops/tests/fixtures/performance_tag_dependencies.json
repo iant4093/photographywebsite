@@ -36,11 +36,6 @@
       "cause": "AlbumWorkDeadLetterQueue.QueueName"
     },
     {
-      "logicalId": "AlbumWorkQueueAgeAlarm",
-      "propertyPath": "Dimensions",
-      "cause": "AlbumWorkQueue.QueueName"
-    },
-    {
       "logicalId": "AlbumWorkQueue",
       "propertyPath": "RedrivePolicy",
       "cause": "AlbumWorkDeadLetterQueue.Arn"
@@ -101,11 +96,6 @@
       "cause": "HoverPreviewRefreshQueue.Arn"
     },
     {
-      "logicalId": "HoverPreviewRefreshQueueAgeAlarm",
-      "propertyPath": "Dimensions",
-      "cause": "HoverPreviewRefreshQueue.QueueName"
-    },
-    {
       "logicalId": "HoverPreviewRefreshQueue",
       "propertyPath": "RedrivePolicy",
       "cause": "AsyncFailureQueue.Arn"
@@ -159,16 +149,6 @@
       "logicalId": "PreviewDeadLetterQueueAlarm",
       "propertyPath": "Dimensions",
       "cause": "PreviewDeadLetterQueue.QueueName"
-    },
-    {
-      "logicalId": "PreviewQueueAgeAlarm",
-      "propertyPath": "Dimensions",
-      "cause": "PreviewQueue.QueueName"
-    },
-    {
-      "logicalId": "PreviewQueueDepthAlarm",
-      "propertyPath": "Dimensions",
-      "cause": "PreviewQueue.QueueName"
     },
     {
       "logicalId": "PreviewQueue",

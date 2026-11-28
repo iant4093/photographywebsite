@@ -41,6 +41,9 @@ After the main stack's bucket policy release succeeds, update the edge stack wit
 
 For updates to a live stack, keep `Traffic=live` when deploying the template and publisher ZIP. Invoke the publisher, then check an existing full-resolution request, `/v1/photos/random?featured=true&preview=webp`, and `/v1/photos?preview=webp&width=640`. Confirm the preview URLs return `Content-Type: image/webp` and the reported byte counts, and compare the response widths with the default and requested values. Deploy the website documentation after verifying the edge update.
 
+The Free plan associates the existing Route 53 hosted zone so AWS includes its
+eligible DNS charges in the plan. CloudFormation updates the subscription in place.
+
 ## Pause traffic
 
 Update the edge stack with `Traffic=paused` to block all API traffic at WAF and stop scheduled refreshes. The public DNS record remains in place. Before reopening after an extended pause, invoke the publisher once and verify a fresh catalog. The Photo API has its own WAF with an approximate limit of 100 requests per IP per five minutes across both routes. The `ian-photography-public-photos-download-spike` CloudWatch alarm tracks 5 GB of viewer downloads in five minutes. Review that alarm and request metrics in `us-east-1` when diagnosing unexpected traffic.
