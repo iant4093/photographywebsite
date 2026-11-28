@@ -36,13 +36,13 @@ export default defineConfig([
     },
   },
   {
-    files: ['ops/cloudfront_www_redirect.js', 'ops/cloudfront_social_router.js'],
+    files: ['ops/cloudfront_*.js'],
     languageOptions: {
       sourceType: 'script',
     },
     rules: {
       // CloudFront Functions discover this required entry point by name.
-      'no-unused-vars': ['error', { varsIgnorePattern: '^(handler|[A-Z_])' }],
+      'no-unused-vars': ['error', { varsIgnorePattern: '^(handler|[A-Z_])', caughtErrorsIgnorePattern: '^_' }],
     },
   },
 ])

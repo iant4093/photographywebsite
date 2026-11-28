@@ -296,7 +296,11 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
         self.assertIn("PathPattern: 'public-previews/*'", distribution)
         self.assertIn("CachePolicyId: !Ref PublicPreviewCachePolicy", distribution)
         self.assertIn("ResponseHeadersPolicyId: !Ref PublicPreviewResponseHeadersPolicy", distribution)
-        self.assertIn("FunctionARN: !GetAtt PublicPreviewRewriteFunction.FunctionMetadata.FunctionARN", distribution)
+        self.assertIn(
+            "FunctionARN: !If\n                  - ServeLegacyMediaDirectly\n"
+            "                  - !GetAtt PublicPreviewRewriteFunction.FunctionMetadata.FunctionARN",
+            distribution,
+        )
         self.assertNotIn("EventType: viewer-response", distribution)
         self.assertIn("PathPattern: 'albums/*/preview/v2/*'", distribution)
         self.assertIn("PathPattern: 'albums/*/preview/v3/*'", distribution)
@@ -307,21 +311,22 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
             "CreateAlbumFunction",
             "AddImagesFunction",
             "UpdateGalleryOrderFunction",
-            "UpdateImageFunction",
         )
-        for logical_id in frontend_only:
+        for logical_id in (*frontend_only, "UpdateImageFunction"):
             block = resource_block(logical_id)
             self.assertIn("CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue", block)
             self.assertIn("sqs:SendMessage", block)
-            self.assertNotIn("distribution/EIOCCNR8XGQ1B", block)
+            if logical_id in frontend_only:
+                self.assertNotIn("distribution/EIOCCNR8XGQ1B", block)
         worker = resource_block("CacheInvalidationWorkerFunction")
         self.assertIn("cloudfront:CreateInvalidation", worker)
         self.assertIn("distribution/EIOCCNR8XGQ1B", worker)
-        for logical_id in ("UpdateAlbumFunction", "DeleteAlbumFunction", "DeleteImagesFunction"):
+        for logical_id in ("UpdateAlbumFunction", "DeleteAlbumFunction", "DeleteImagesFunction", "UpdateImageFunction"):
             block = resource_block(logical_id)
             self.assertIn("IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront", block)
             self.assertIn("cloudfront:CreateInvalidation", block)
             self.assertIn("distribution/${ImagesCloudFront}", block)
+            self.assertIn("distribution/EIOCCNR8XGQ1B", block)
             self.assertNotIn("Resource: '*'", block)
 
     def test_media_origin_access_logs_use_scoped_existing_audit_bucket_policy(self) -> None:

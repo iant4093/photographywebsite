@@ -9,11 +9,16 @@ function handler(event) {
         var part;
         try {
             part = decodeURIComponent(parts[index]);
-        } catch (error) {
+        } catch (_error) {
             allowed = false;
             break;
         }
-        allowed = part !== '' && part !== '.' && part !== '..' && !/[\/\\\x00-\x1f\x7f]/.test(part);
+        allowed = part !== '' && part !== '.' && part !== '..'
+            && part.indexOf('/') === -1 && part.indexOf('\\') === -1;
+        for (var character = 0; allowed && character < part.length; character += 1) {
+            var code = part.charCodeAt(character);
+            allowed = code >= 32 && code !== 127;
+        }
     }
 
     if (allowed && parts[0] === 'public-previews') {
