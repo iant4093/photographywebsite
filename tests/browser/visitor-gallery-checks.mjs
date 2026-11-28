@@ -1000,11 +1000,13 @@ async function mobileToolbarLayoutCase() {
                 return { top, bottom, height, width }
             }
             const button = document.querySelector('.linen-back-to-top').getBoundingClientRect()
+            const bottomEdge = document.querySelector('.linen-browser-bottom-edge').getBoundingClientRect()
             return {
                 cover: box(document.querySelector('.linen-hero')),
                 heading: box(document.getElementById('photo-albums')),
                 card: box(element),
                 button: { bottomGap: innerHeight - button.bottom, rightGap: innerWidth - button.right },
+                bottomEdge: { bottomGap: innerHeight - bottomEdge.bottom, height: bottomEdge.height, width: bottomEdge.width },
                 rail: box(document.querySelector('.editorial-progress')),
                 scroll: { top: scrollY, height: document.documentElement.scrollHeight },
             }
@@ -1014,6 +1016,7 @@ async function mobileToolbarLayoutCase() {
         const before = await positions()
         assert.ok(before.rail.bottom < expandedHeight, 'The rail fits above the expanded toolbar')
         assert.deepEqual(before.button, { bottomGap: 24, rightGap: 24 }, 'Back to Top starts in the visible bottom-right corner')
+        assert.deepEqual(before.bottomEdge, { bottomGap: 0, height: 12, width }, 'The solid edge stays flush with the toolbar')
         for (const height of [900, expandedHeight, 900]) {
             await page.setViewportSize({ width, height })
             await paint()
@@ -1042,16 +1045,20 @@ async function mobileToolbarLayoutCase() {
         const navbarSurface = () => navbar.evaluate(element => {
             const surface = getComputedStyle(element).backgroundColor
             const extension = getComputedStyle(element, '::before')
+            const bottomEdge = getComputedStyle(document.querySelector('.linen-browser-bottom-edge'))
             return { surface, extension: extension.backgroundColor,
-                extensionHeight: parseFloat(extension.height), expected: getComputedStyle(element.closest('.linen-site')).backgroundColor }
+                extensionHeight: parseFloat(extension.height), bottom: bottomEdge.backgroundColor,
+                bottomPointerEvents: bottomEdge.pointerEvents, expected: getComputedStyle(element.closest('.linen-site')).backgroundColor }
         })
         const light = await navbarSurface()
         await navbar.getByRole('button', { name: 'Switch to dark mode' }).click()
         const dark = await navbarSurface()
-        for (const { surface, extension, extensionHeight, expected } of [light, dark]) {
+        for (const { surface, extension, extensionHeight, bottom, bottomPointerEvents, expected } of [light, dark]) {
             assert.equal(surface, expected, 'The mobile navbar has an opaque, theme-matched surface')
             assert.equal(extension, surface, 'The same surface extends behind the phone status bar')
             assert.ok(extensionHeight >= 62)
+            assert.equal(bottom, expected, 'The toolbar samples the same solid surface in both themes')
+            assert.equal(bottomPointerEvents, 'none', 'The bottom edge does not intercept taps')
         }
         assert.notEqual(dark.surface, light.surface)
         await page.evaluate(top => scrollTo({ top, behavior: 'instant' }), start + 8)

@@ -171,6 +171,7 @@ function App() {
                 </Suspense>
                 </RecoveryBoundary>
             </main>
+            {!isAdminRoute && !isImmersiveRoute && <div className="linen-browser-bottom-edge" aria-hidden="true" />}
             {!isImmersiveRoute && <RecoveryBoundary optional><Suspense fallback={null}><BackToTop /></Suspense></RecoveryBoundary>}
             {!isImmersiveRoute && (
                 <RecoveryBoundary optional>
