@@ -1039,6 +1039,21 @@ async function mobileToolbarLayoutCase() {
         assert.ok(navbarStates.every(visible => !visible), 'The navbar stays hidden through quick direction reversals')
         await page.evaluate(top => scrollTo({ top, behavior: 'instant' }), start - 64)
         await navbar.and(page.locator('[data-navbar-visible]')).waitFor({ state: 'attached' })
+        const navbarSurface = () => navbar.evaluate(element => {
+            const surface = getComputedStyle(element).backgroundColor
+            const extension = getComputedStyle(element, '::before')
+            return { surface, extension: extension.backgroundColor,
+                extensionHeight: parseFloat(extension.height), expected: getComputedStyle(element.closest('.linen-site')).backgroundColor }
+        })
+        const light = await navbarSurface()
+        await navbar.getByRole('button', { name: 'Switch to dark mode' }).click()
+        const dark = await navbarSurface()
+        for (const { surface, extension, extensionHeight, expected } of [light, dark]) {
+            assert.equal(surface, expected, 'The mobile navbar has an opaque, theme-matched surface')
+            assert.equal(extension, surface, 'The same surface extends behind the phone status bar')
+            assert.ok(extensionHeight >= 62)
+        }
+        assert.notEqual(dark.surface, light.surface)
         await page.evaluate(top => scrollTo({ top, behavior: 'instant' }), start + 8)
         await page.locator('.linen-nav:not([data-navbar-visible])').waitFor({ state: 'attached' })
         await button.tap()
@@ -1833,20 +1848,21 @@ async function calendarYearCase(width) {
         await firstDay.click()
         await dayResults.evaluate(panel => Promise.allSettled(panel.getAnimations({ subtree: true }).map(animation => animation.finished)))
         const card = calendar.locator('[data-route-card="calendar"]')
-        await card.evaluate(async element => {
+        const mobile = width < 500
+        await card.evaluate(async (element, mobile) => {
             element.scrollIntoView({ block: 'center', behavior: 'instant' })
             const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
             await paint()
-            scrollBy({ top: -15, behavior: 'instant' })
+            scrollBy({ top: mobile ? -48 : -15, behavior: 'instant' })
             await paint()
-        })
-        const nav = page.locator('.linen-nav')
+        }, mobile)
+        const nav = page.locator('.linen-nav[data-navbar-visible]')
+        await nav.waitFor({ state: 'attached' })
         await nav.evaluate(async element => {
             await Promise.allSettled(element.getAnimations().map(animation => animation.finished))
         })
         const navbarBottom = await nav.evaluate(element => element.getBoundingClientRect().bottom)
         assert.ok(navbarBottom > 10, 'The navbar is visible when opening the calendar album')
-        const mobile = width < 500
         if (!mobile) await observeLiveTitleHandoff(page, 'enter')
         await card.click()
         const entering = page.locator('main[data-route-page-motion="enter"]')

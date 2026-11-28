@@ -118,7 +118,7 @@
   height: calc(74px + env(safe-area-inset-top, 0px));
   padding-top: env(safe-area-inset-top, 0px);
   color: var(--color-charcoal);
-  background: rgba(243, 239, 230, 0.94);
+  background: var(--linen-nav-surface, rgba(243, 239, 230, 0.94));
   border-bottom: 1px solid var(--color-charcoal);
   backdrop-filter: blur(12px);
 }
@@ -127,6 +127,22 @@
   .linen-site :is(.linen-nav, .linen-menu) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
+  }
+
+  .linen-site .linen-nav {
+    background: var(--color-cream);
+    transition-property: translate;
+  }
+
+  .linen-site .linen-nav::before {
+    /* iOS can place the fixed bar below its translucent status area. */
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 100%;
+    height: max(5rem, env(safe-area-inset-top, 0px));
+    background: inherit;
+    pointer-events: none;
   }
 }
 
