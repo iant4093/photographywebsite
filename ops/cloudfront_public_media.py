@@ -177,6 +177,8 @@ def main():
         raise RuntimeError("CloudFront did not publish the expected public media function")
     etag, config = refresh_distribution_after_dependencies(args.frontend_distribution_id, config, profile=profile)
     desired = updated_distribution(config, legacy, origin_domain, function_arn, cache_ids, response_ids)
+    if desired == config:
+        return
     aws_with_json_file(
         ["cloudfront", "update-distribution", "--id", args.frontend_distribution_id, "--if-match", etag,
          "--distribution-config", "file://{json_file}"],

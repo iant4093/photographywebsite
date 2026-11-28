@@ -1,13 +1,10 @@
 """Daily per-album storage and media CDN bandwidth for the AWS costs page.
 
 Storage is the size of each album's current objects under ``albums/<id>/``.
-Bandwidth is summed from the media distribution's standard access logs: only
-the bytes each album's paths served are kept, never addresses or user agents.
-Each log day is reduced to one small cache item, so the 30-day window is a
-handful of reads, and a day is counted once its logs have had time to arrive.
-
-Protected media delivered through the site's signed-cookie path is served by
-the frontend distribution and is not in these logs.
+Bandwidth comes from CloudFront standard access logs for the legacy media
+distribution and the frontend's public media route. The daily aggregates keep
+only bytes by album. Redirects and the signed-cookie private media route are
+excluded.
 """
 
 import datetime
@@ -69,7 +66,7 @@ def album_storage():
     return sizes, counts
 
 
-def parse_log(lines, totals):
+def parse_log(lines, totals, *, viewer_prefix="/"):
     """Add one CloudFront standard log's bytes per album to ``totals``."""
     fields = None
     for line in lines:
@@ -80,11 +77,14 @@ def parse_log(lines, totals):
             continue
         values = line.rstrip("\n").split("\t")
         record = dict(zip(fields, values))
+        path = record.get("cs-uri-stem", "")
+        if not path.startswith(viewer_prefix) or record.get("sc-status") == "307":
+            continue
         try:
             sent = int(record.get("sc-bytes", "0"))
         except ValueError:
             continue
-        match = ALBUM_PATH.match(record.get("cs-uri-stem", ""))
+        match = ALBUM_PATH.match(path[len(viewer_prefix) - 1:])
         album_id = match.group(1) if match else OTHER
         totals[album_id] = totals.get(album_id, 0) + sent
     return totals
@@ -93,14 +93,19 @@ def parse_log(lines, totals):
 def day_bandwidth(day):
     """Bytes served per album on one UTC day, from that day's log files."""
     bucket = os.environ["MEDIA_LOGS_BUCKET"]
-    prefix = f"media/{os.environ['IMAGES_DISTRIBUTION_ID']}.{day.isoformat()}-"
+    sources = [(f"media/{os.environ['IMAGES_DISTRIBUTION_ID']}", "/")]
+    frontend = os.environ.get("PUBLIC_MEDIA_DISTRIBUTION_ID", "")
+    if frontend:
+        sources.append((f"frontend/{frontend}", "/media/"))
     totals = {}
     paginator = _client().get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for item in page.get("Contents", []):
-            body = _client().get_object(Bucket=bucket, Key=item["Key"])["Body"].read()
-            text = gzip.decompress(body).decode("utf-8", errors="replace")
-            parse_log(text.splitlines(), totals)
+    for log_prefix, viewer_prefix in sources:
+        prefix = f"{log_prefix}.{day.isoformat()}-"
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get("Contents", []):
+                body = _client().get_object(Bucket=bucket, Key=item["Key"])["Body"].read()
+                text = gzip.decompress(body).decode("utf-8", errors="replace")
+                parse_log(text.splitlines(), totals, viewer_prefix=viewer_prefix)
     return totals
 
 

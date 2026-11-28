@@ -24,8 +24,8 @@ TODAY = dt.date(2026, 10, 5)
 FIELDS = "#Fields: date time x-edge-location sc-bytes c-ip cs-method cs(Host) cs-uri-stem sc-status\n"
 
 
-def log_line(path, sent):
-    return f"2026-10-01\t10:00:00\tSEA19\t{sent}\t198.51.100.7\tGET\tmedia.example\t{path}\t200\n"
+def log_line(path, sent, status=200):
+    return f"2026-10-01\t10:00:00\tSEA19\t{sent}\t198.51.100.7\tGET\tmedia.example\t{path}\t{status}\n"
 
 
 def log(*entries):
@@ -147,6 +147,25 @@ class UsageRunTests(unittest.TestCase):
         self.assertNotIn("Item", self.cache.get_item(Key={"cacheKey": album_usage.DAY_KEY.format(day="2026-08-30")}))
         # Nothing new to read on a repeat run the same day.
         self.assertEqual(self.run_job()["processed"], 0)
+
+    def test_cutover_day_counts_both_edges_and_ignores_redirects_and_private_routes(self):
+        self.enterContext(patch.dict(os.environ, {"PUBLIC_MEDIA_DISTRIBUTION_ID": "FRONTEND"}))
+        s3 = boto3.client("s3", region_name="us-west-2")
+        s3.put_object(
+            Bucket="logs-usage", Key=f"media/{DIST}.2026-10-03-03.redirect.gz",
+            Body=log((f"/albums/{A}/thumbnail/a.jpg", 430, 307)),
+        )
+        s3.put_object(
+            Bucket="logs-usage", Key="frontend/FRONTEND.2026-10-03-03.media.gz",
+            Body=log((f"/media/public-previews/{A}/v3/abc-w640.webp", 125),
+                     (f"/private-media/albums/{A}/original/a.jpg", 10000),
+                     ("/assets/app.js", 50000), ("/media/site/hero/home", 9)),
+        )
+        self.run_job()
+        summary = self.summary()
+        rows = {row["albumId"]: row for row in summary["byBandwidth"]}
+        self.assertEqual(rows[A]["bandwidthBytes"], 1130)
+        self.assertEqual(summary["otherBandwidthBytes"], 18)
 
     def test_a_run_stops_reading_logs_when_time_is_short(self):
         self.assertEqual(self.run_job(remaining=1000), {"albums": 2, "logDays": 0, "processed": 0})

@@ -61,23 +61,25 @@ route overrides below apply to all callers combined, not to each visitor:
 Every other route uses the stage default, including gallery lists, details, and
 uploads. Detailed route metrics are off.
 
-The web ACL has five rules: two AWS managed rule groups and three per-IP rate
-rules. The same ACL is attached to the frontend distribution and the media CDN
-(`ImagesCloudFront` sets it as its `WebACLId`). The per-IP limits, per
-300-second window, are:
+The web ACL has five blocking rules and the AWS Core Rule Set in Count mode.
+It protects the frontend, API, and public media on the site distribution. The
+legacy media distribution shares the ACL during redirect verification. Its
+attachment is retired once the legacy host only redirects. The per-IP limits,
+per 300-second window, are:
 
 | Scope | Requests per IP per 5 minutes |
 |---|---:|
 | API (URI path starts with `/api/`) | 3,000 |
 | Explore (URI path `/api/public/explore`) | 600 |
-| Media CDN (`Host` header `d1twwtwfz1yeo4.cloudfront.net`) | 4,000 |
+| Public media (`/media/` and the legacy media host while protected) | 4,000 |
 
 The busiest real media viewer in the 2026-09-16 to 2026-10-16 access logs
 peaked near 1,800 requests per window. These numbers are the parameter defaults
 in `ops/waf_front_door_template.yaml`. They are also `WAF_RATE_LIMIT_CONTRACT`
 in `ops/cloudfront_frontend.py`, which refuses to run if the live ACL does not
-match, and a test keeps the two in sync. All rules use BLOCK actions. Several
-viewers behind one shared IP count toward the same limit.
+match, and a test keeps the two in sync. The rate limits use BLOCK actions.
+Several viewers behind one shared IP count toward the same limit. Core Rule Set
+matches are available through CloudWatch CountedRequests metrics.
 
 The download and original-comparison handler validates the request body (8 KiB
 limit) and the media identifier before any album or identity lookup. Valid

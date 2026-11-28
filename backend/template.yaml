@@ -2900,10 +2900,12 @@ Resources:
               Resource: !GetAtt MediaAccessLogsBucket.Arn
               Condition:
                 StringLike:
-                  s3:prefix: media/*
+                  s3:prefix: [media/*, 'frontend/EIOCCNR8XGQ1B.*']
             - Effect: Allow
               Action: s3:GetObject
-              Resource: !Sub '${MediaAccessLogsBucket.Arn}/media/*'
+              Resource:
+                - !Sub '${MediaAccessLogsBucket.Arn}/media/*'
+                - !Sub '${MediaAccessLogsBucket.Arn}/frontend/EIOCCNR8XGQ1B.*'
       Events:
         DailyUsage:
           Type: Schedule
