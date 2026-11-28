@@ -2,6 +2,7 @@
   "version": 1,
   "additions": {
     "OriginalComparisonsEnabled": "true",
-    "AlbumWorkRouting": "legacy"
+    "AlbumWorkRouting": "legacy",
+    "LegacyMediaDeliveryMode": "direct"
   }
 }

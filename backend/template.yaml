@@ -91,6 +91,11 @@ Parameters:
     Type: Number
     Default: 30
     AllowedValues: [7, 14, 30, 60, 90, 120, 180, 365]
+  LegacyMediaDeliveryMode:
+    Type: String
+    Default: direct
+    AllowedValues: [direct, protected-redirect, redirect-only]
+    Description: Stage legacy URLs through a protected redirect before retiring its WAF and S3 access.
   MediaAccessLogRetentionDays:
     Type: Number
     Default: 90
@@ -172,6 +177,8 @@ Conditions:
   HasGoogleOAuthSecret: !Not [!Equals [!Ref GoogleOAuthSecretArn, '']]
   HasApplicationSecretsKmsKey: !Not [!Equals [!Ref ApplicationSecretsKmsKeyArn, '']]
   EnforcePrivateMediaDeny: !Equals [!Ref EnforcePrivateMediaCloudFrontDeny, 'true']
+  ServeLegacyMediaDirectly: !Equals [!Ref LegacyMediaDeliveryMode, direct]
+  ProtectLegacyMediaDistribution: !Not [!Equals [!Ref LegacyMediaDeliveryMode, redirect-only]]
   ProvisionApiFrontDoorResources: !Equals [!Ref ProvisionApiFrontDoor, 'true']
   DisableDefaultApiEndpoint: !Equals [!Ref DisableExecuteApiEndpoint, 'true']
 
@@ -187,6 +194,7 @@ Globals:
         COGNITO_USER_POOL_ID: !Ref UserPool
         COGNITO_CLIENT_ID: !Ref UserPoolClient
         APPLICATION_STAGE: !Ref Stage
+        PUBLIC_MEDIA_DISTRIBUTION_ID: !If [IsPhotoApiProduction, EIOCCNR8XGQ1B, '']
         RELEASE_SHA: !Ref ReleaseSha
         FRONT_DOOR_CONFIG_PARAMETER: !Sub '/ian-website/${Stage}/front-door-config'
         FRONT_DOOR_ENFORCEMENT_ENABLED: !Ref FrontDoorEnforcementEnabled
@@ -1055,15 +1063,18 @@ Resources:
             Condition:
               Bool:
                 aws:SecureTransport: false
-          - Sid: AllowThisCloudFrontDistributionReadOnly
-            Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
-            Action: s3:GetObject
-            Resource: !Sub '${ImagesBucket.Arn}/*'
-            Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+          - !If
+            - ProtectLegacyMediaDistribution
+            - Sid: AllowThisCloudFrontDistributionReadOnly
+              Effect: Allow
+              Principal:
+                Service: cloudfront.amazonaws.com
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/*'
+              Condition:
+                StringEquals:
+                  AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+            - !Ref AWS::NoValue
           - !If
             - IsPhotoApiProduction
             - Sid: AllowPhotoApiPublicAlbumObjects
@@ -1688,6 +1699,11 @@ Resources:
           OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
           ResponseHeadersPolicyId: !Ref MediaResponseHeadersPolicy
           Compress: true
+          FunctionAssociations: !If
+            - ServeLegacyMediaDirectly
+            - !Ref AWS::NoValue
+            - - EventType: viewer-request
+                FunctionARN: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/iantruongphotography-legacy-media-redirect-v1'
         CacheBehaviors:
           - PathPattern: 'public-previews/*'
             TargetOriginId: S3Origin
@@ -1700,7 +1716,10 @@ Resources:
             Compress: false
             FunctionAssociations:
               - EventType: viewer-request
-                FunctionARN: !GetAtt PublicPreviewRewriteFunction.FunctionMetadata.FunctionARN
+                FunctionARN: !If
+                  - ServeLegacyMediaDirectly
+                  - !GetAtt PublicPreviewRewriteFunction.FunctionMetadata.FunctionARN
+                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/iantruongphotography-legacy-media-redirect-v1'
           - PathPattern: 'site/hero/versions/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -1710,6 +1729,11 @@ Resources:
             OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
             ResponseHeadersPolicyId: !Ref PreviewMediaResponseHeadersPolicy
             Compress: false
+            FunctionAssociations: !If
+              - ServeLegacyMediaDirectly
+              - !Ref AWS::NoValue
+              - - EventType: viewer-request
+                  FunctionARN: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/iantruongphotography-legacy-media-redirect-v1'
           - PathPattern: 'site/hero/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -1719,6 +1743,11 @@ Resources:
             OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
             ResponseHeadersPolicyId: !Ref HeroMediaResponseHeadersPolicy
             Compress: false
+            FunctionAssociations: !If
+              - ServeLegacyMediaDirectly
+              - !Ref AWS::NoValue
+              - - EventType: viewer-request
+                  FunctionARN: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/iantruongphotography-legacy-media-redirect-v1'
           - PathPattern: 'albums/*/preview/v3/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -1728,6 +1757,11 @@ Resources:
             OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
             ResponseHeadersPolicyId: !Ref PreviewMediaResponseHeadersPolicy
             Compress: false
+            FunctionAssociations: !If
+              - ServeLegacyMediaDirectly
+              - !Ref AWS::NoValue
+              - - EventType: viewer-request
+                  FunctionARN: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/iantruongphotography-legacy-media-redirect-v1'
           - PathPattern: 'albums/*/preview/v2/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -1737,15 +1771,22 @@ Resources:
             OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
             ResponseHeadersPolicyId: !Ref PreviewMediaResponseHeadersPolicy
             Compress: false
+            FunctionAssociations: !If
+              - ServeLegacyMediaDirectly
+              - !Ref AWS::NoValue
+              - - EventType: viewer-request
+                  FunctionARN: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/iantruongphotography-legacy-media-redirect-v1'
         Logging:
           Bucket: !GetAtt MediaAccessLogsBucket.DomainName
           IncludeCookies: false
           Prefix: media/
         PriceClass: PriceClass_100
-        # Shares the retained front-door web ACL (ops/waf_front_door_template.yaml,
-        # us-east-1) with the frontend distribution, so it adds no second ACL fee.
-        # Managed threat rules and MediaPerIpRateLimit apply to media requests.
-        WebACLId: !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/IanPhotography-FrontDoor-${Stage}/f65f8e2d-edf5-4853-9b16-64e43cd0554a'
+        # Keep the shared ACL during redirect verification; the last stage
+        # leaves the legacy host with a redirect but no media origin grant.
+        WebACLId: !If
+          - ProtectLegacyMediaDistribution
+          - !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/IanPhotography-FrontDoor-${Stage}/f65f8e2d-edf5-4853-9b16-64e43cd0554a'
+          - ''
       Tags:
         - Key: Feature
           Value: public-delivery
@@ -3467,7 +3508,9 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
@@ -3623,7 +3666,9 @@ Resources:
                 - !Sub '${ImagesBucket.Arn}/album-zips/*'
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         DeleteAlbum:
           Type: HttpApi
@@ -3856,7 +3901,9 @@ Resources:
                     - site/hero/video/current/*
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         PreviewJobs:
           Type: SQS
@@ -4225,7 +4272,9 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         DeleteImages:
           Type: HttpApi
@@ -4410,7 +4459,9 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
         - Statement:
             - Effect: Allow
               Action:
@@ -4594,7 +4645,9 @@ Resources:
               Resource: !GetAtt PreviewQueue.Arn
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
             # Each cut encodes in its own invocation; the worker chains them.
             # A name pattern avoids a role -> function -> role cycle.
             - Effect: Allow
@@ -5129,7 +5182,9 @@ Resources:
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow

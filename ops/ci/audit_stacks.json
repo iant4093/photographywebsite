@@ -30,6 +30,7 @@
     },
     {"region": "us-west-2", "name": "ian-photography-backup-primary"},
     {"region": "us-west-2", "name": "ian-photography-observability"},
+    {"region": "us-west-2", "name": "ian-photography-public-media-origin"},
     {"region": "us-east-1", "name": "ian-photography-front-door-waf"},
     {"region": "us-east-2", "name": "ian-photography-backup-replica"}
   ]

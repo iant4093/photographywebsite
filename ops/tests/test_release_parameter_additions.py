@@ -20,7 +20,7 @@ from ops.ci import release_guard  # noqa: E402
 
 
 SHA = "a" * 40
-ADDITION = {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy"}
+ADDITION = {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy", "LegacyMediaDeliveryMode": "direct"}
 DOCUMENT = {"version": 1, "additions": ADDITION}
 
 
@@ -45,6 +45,7 @@ def request(flag="true", *, existing=False, routing="legacy"):
         values.append({"ParameterKey": "OriginalComparisonsEnabled", **({"UsePreviousValue": True} if existing else {"ParameterValue": flag})})
     if routing is not None:
         values.append({"ParameterKey": "AlbumWorkRouting", "ParameterValue": routing})
+        values.append({"ParameterKey": "LegacyMediaDeliveryMode", "ParameterValue": "direct"})
     return values
 
 
@@ -55,6 +56,7 @@ def resolved(flag="true", *, routing="legacy"):
         values.append({"ParameterKey": "OriginalComparisonsEnabled", "ParameterValue": flag})
     if routing is not None:
         values.append({"ParameterKey": "AlbumWorkRouting", "ParameterValue": routing})
+        values.append({"ParameterKey": "LegacyMediaDeliveryMode", "ParameterValue": "direct"})
     return values
 
 

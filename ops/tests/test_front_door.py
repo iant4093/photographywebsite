@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ops"))
 
 import cloudfront_frontend  # noqa: E402
+import cloudfront_public_media  # noqa: E402
 import front_door_preflight  # noqa: E402
 
 
@@ -422,6 +424,57 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertNotIn(runtime_value, output.getvalue())
 
 
+class PublicMediaCanaryTests(unittest.TestCase):
+    def event_result(self, filename, path, *, headers=None, method="GET"):
+        source = (ROOT / "ops" / filename).read_text().replace("__APEX_HOST__", "site.test")
+        event = {"request": {"uri": path, "headers": headers or {}, "querystring": {}, "method": method}}
+        command = source + "\nconsole.log(JSON.stringify(handler(JSON.parse(process.argv[1]))));"
+        return json.loads(subprocess.check_output(["node", "-e", command, json.dumps(event)], text=True))
+
+    def test_public_cache_keys_and_origins_are_isolated(self):
+        result = self.event_result("cloudfront_public_media.js", "/media/albums/example/photo.jpg",
+                                   headers={"x-public-media-cache": {"value": "viewer"}})
+        self.assertEqual(result["uri"], "/albums/example/photo.jpg")
+        self.assertEqual(result["headers"]["x-public-media-cache"], {"value": "public"})
+        denied = (
+            "/media/temp-zips/example.zip",
+            "/media/album-zips/example.zip",
+            "/media/albums/%2e%2e/example.jpg",
+            "/media/albums/example%2Fphoto.jpg",
+            "/media/site/other/file",
+            "/media/public-previews/example/v3/file",
+        )
+        for path in denied:
+            self.assertEqual(self.event_result("cloudfront_public_media.js", path)["statusCode"], 404)
+
+    def test_legacy_redirect_and_preflight_preserve_public_links(self):
+        source = "cloudfront_legacy_media_redirect.js"
+        headers = {"origin": {"value": "https://site.test"}}
+        result = self.event_result(source, "/albums/example/photo.jpg", headers=headers)
+        self.assertEqual(result["statusCode"], 307)
+        self.assertEqual(result["headers"]["location"]["value"], "https://site.test/media/albums/example/photo.jpg")
+        self.assertEqual(result["headers"]["access-control-allow-origin"]["value"], "https://site.test")
+        result = self.event_result(source, "/site/hero/index.m3u8", method="OPTIONS", headers={
+            **headers,
+            "access-control-request-method": {"value": "GET"},
+            "access-control-request-headers": {"value": "Range"},
+        })
+        self.assertEqual(result["statusCode"], 204)
+        self.assertEqual(self.event_result(source, "/album-zips/file.zip")["statusCode"], 403)
+
+    def test_public_cache_policies_keep_the_existing_ttl_and_partition(self):
+        original = {"Name": "Existing", "DefaultTTL": 60, "MinTTL": 0, "MaxTTL": 86400,
+                    "ParametersInCacheKeyAndForwardedToOrigin": {}}
+        canary = cloudfront_public_media.cache_policy(original, enable_cache=False)
+        ready = cloudfront_public_media.cache_policy(original, enable_cache=True)
+        self.assertEqual(canary["MaxTTL"], 1)
+        self.assertEqual(ready["MaxTTL"], 86400)
+        self.assertEqual(
+            ready["ParametersInCacheKeyAndForwardedToOrigin"]["HeadersConfig"]["Headers"]["Items"],
+            ["x-public-media-cache"],
+        )
+
+
 class WafAndPreflightTests(unittest.TestCase):
     def test_waf_is_retained_selectively_blocking_and_privacy_safe(self) -> None:
         self.assertIn("Scope: CLOUDFRONT", WAF_TEMPLATE)
@@ -470,10 +523,11 @@ class WafAndPreflightTests(unittest.TestCase):
         sam = (ROOT / "backend" / "template.yaml").read_text(encoding="utf-8")
         media = sam.split("\n  ImagesCloudFront:\n", 1)[1].split("\n  MediaConvertRole:\n", 1)[0]
         self.assertIn(
-            "WebACLId: !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/"
+            "- !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/"
             "IanPhotography-FrontDoor-${Stage}/",
             media,
         )
+        self.assertIn("WebACLId: !If\n          - ProtectLegacyMediaDistribution", media)
         self.assertIn("Name: !Sub 'IanPhotography-FrontDoor-${Stage}'", WAF_TEMPLATE)
         self.assertNotIn("AlarmTopicArn", WAF_TEMPLATE)
         self.assertNotIn("AlarmActions:", WAF_TEMPLATE)

@@ -2427,6 +2427,22 @@ class PublicPostureSmokeTests(unittest.TestCase):
 
         return request
 
+    def test_public_posture_accepts_only_the_reviewed_media_redirect(self):
+        upstream = self.requester()
+
+        def request(url, timeout, headers, max_bytes):
+            if url == "https://media.test/public/thumb.jpg":
+                return public_posture_smoke.RawResponse(307, {"location": destination}, b"")
+            if url == "https://site.test/media/public/thumb.jpg":
+                return public_posture_smoke.RawResponse(206, {"content-type": "image/webp"}, b"x")
+            return upstream(url, timeout, headers, max_bytes)
+
+        destination = "https://site.test/media/public/thumb.jpg"
+        self.assertEqual(public_posture_smoke.run_posture(self.config(), requester=request)["mediaAuthorizationChecks"], 2)
+        destination = "https://unknown.test/media/public/thumb.jpg"
+        with self.assertRaisesRegex(public_posture_smoke.PostureError, "bypasses the canonical media route"):
+            public_posture_smoke.run_posture(self.config(), requester=request)
+
     def test_complete_public_posture_contract_passes_with_aggregate_metrics(self):
         metrics = public_posture_smoke.run_posture(
             self.config(), requester=self.requester()
@@ -2780,7 +2796,7 @@ class WorkflowPolicyTests(unittest.TestCase):
             release_guard.load_parameter_additions(json.loads(
                 (ROOT / parameter_policy).read_text(encoding="utf-8")
             )),
-            {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy"},
+            {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy", "LegacyMediaDeliveryMode": "direct"},
         )
         for helper in (plan, execute, collect):
             self.assertIn(

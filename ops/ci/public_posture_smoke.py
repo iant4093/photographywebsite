@@ -451,6 +451,13 @@ def run_posture(
         raise PostureError("public catalog did not expose a CDN media candidate")
     media_url = min(media_candidates, key=lambda item: item[0])[1]
     media = requester(media_url, config.timeout, {"Range": "bytes=0-0"}, 65_536)
+    if media.status == 307:
+        parsed = urllib.parse.urlsplit(media_url)
+        suffix = urllib.parse.urlunsplit(("", "", f"/media{parsed.path}", parsed.query, ""))
+        destination = _join(config.site_url, suffix)
+        if media.headers.get("location") != destination or "set-cookie" in media.headers:
+            raise PostureError("public CDN redirect bypasses the canonical media route")
+        media = requester(destination, config.timeout, {"Range": "bytes=0-0"}, 65_536)
     if media.status not in {200, 206} or "set-cookie" in media.headers:
         raise PostureError("public CDN media candidate is unavailable")
 

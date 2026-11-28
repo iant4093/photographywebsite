@@ -39,6 +39,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from album_media_store import MEDIA_STORE_VERSION, query_album_media
+from cache_invalidation import media_invalidation_targets
 from hero_reel_plan import (
     BUILDER_VERSION,
     LADDERS,
@@ -792,21 +793,21 @@ def pointer_document(record):
 
 
 def _invalidate(paths, reference):
-    distribution = os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip()
-    if not distribution:
-        return False
-    try:
-        _client("cloudfront").create_invalidation(
-            DistributionId=distribution,
-            InvalidationBatch={
-                "CallerReference": f"{reference}-{uuid.uuid4().hex[:12]}",
-                "Paths": {"Quantity": len(paths), "Items": paths},
-            },
-        )
-        return True
-    except (BotoCoreError, ClientError) as error:
-        logger.error("hero_reel_invalidation_failed error_type=%s", type(error).__name__)
-        return False
+    results = []
+    for distribution, viewer_paths in media_invalidation_targets(paths):
+        try:
+            _client("cloudfront").create_invalidation(
+                DistributionId=distribution,
+                InvalidationBatch={
+                    "CallerReference": f"{reference}-{uuid.uuid4().hex[:12]}",
+                    "Paths": {"Quantity": len(viewer_paths), "Items": viewer_paths},
+                },
+            )
+            results.append(True)
+        except (BotoCoreError, ClientError) as error:
+            logger.error("hero_reel_invalidation_failed error_type=%s", type(error).__name__)
+            results.append(False)
+    return bool(results) and all(results)
 
 
 def write_pointer(record):

@@ -88,6 +88,39 @@ class MediaRevocationTests(unittest.TestCase):
             "body": json.dumps({"visibility": visibility}),
         }, None)
 
+    def test_media_revocation_waits_for_both_distributions(self):
+        self.stack.enter_context(patch.dict(os.environ, {"PUBLIC_MEDIA_DISTRIBUTION_ID": "frontend"}))
+        self.cloudfront.create_invalidation.side_effect = [
+            {"Invalidation": {"Id": "old", "Status": "Completed"}},
+            {"Invalidation": {"Id": "new", "Status": "InProgress"}},
+        ]
+        self.cloudfront.get_invalidation.return_value = {
+            "Invalidation": {"Id": "new", "Status": "Completed"}
+        }
+        receipt = cache_invalidation.prepare_media_revocation(self.record, "change")
+        self.assertEqual(receipt["distribution"], "media")
+        frontend = receipt["additional"][0]
+        self.assertEqual(frontend["distribution"], "frontend")
+        self.assertIn(f"/albums/{ALBUM_ID}/*", frontend["paths"])
+        self.assertIn(f"/media/albums/{ALBUM_ID}/*", frontend["paths"])
+        self.assertIn(f"/media/public-previews/{ALBUM_ID}/*", frontend["paths"])
+        self.assertFalse(cache_invalidation.advance_media_revocation(receipt))
+        self.assertTrue(receipt["complete"])
+        self.assertFalse(frontend["complete"])
+        frontend["checkAfter"] = 0
+        self.assertTrue(cache_invalidation.advance_media_revocation(receipt))
+        self.assertEqual(self.cloudfront.create_invalidation.call_count, 2)
+        self.cloudfront.get_invalidation.assert_called_once_with(DistributionId="frontend", Id="new")
+
+    def test_legacy_in_flight_receipt_can_finish_after_the_frontend_is_added(self):
+        self.stack.enter_context(patch.dict(os.environ, {"PUBLIC_MEDIA_DISTRIBUTION_ID": "frontend"}))
+        receipt = {"distribution": "media", "caller": "old", "paths": ["/albums/old/*"], "id": "old"}
+        self.cloudfront.get_invalidation.return_value = {
+            "Invalidation": {"Id": "old", "Status": "Completed"}
+        }
+        self.assertTrue(cache_invalidation.advance_media_revocation(receipt))
+        self.cloudfront.create_invalidation.assert_not_called()
+
     def test_private_transition_blocks_origin_then_purges_before_committing(self):
         response = self.update_visibility("private")
         self.assertEqual(response["statusCode"], 200)

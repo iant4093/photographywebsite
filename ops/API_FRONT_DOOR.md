@@ -200,3 +200,23 @@ Before changing a rule, review its WAF metrics over representative traffic.
 Record each exclusion with an owner, reason, evidence, expiry, test, and
 rollback. IP addresses, paths, user agents, and request identifiers are
 restricted security data.
+
+### Public media consolidation
+
+The site serves public media under `/media/` through the tag-restricted S3
+access point in `ops/public_media_origin_template.yaml`. Its cache policy includes
+a fixed header added at the edge so public and signed requests for the same
+object have distinct cache keys. Album revocations invalidate both distributions
+while old links are in use. Existing ZIP downloads go directly to S3 with
+presigned URLs.
+
+Use `ops/cloudfront_public_media.py` to stage the site behavior. Enable the
+legacy cache TTLs only after the backend release can invalidate the site
+distribution. The S3 access point must reject private objects even after a
+successful signed request to the other behavior.
+
+The backend stack's `LegacyMediaDeliveryMode` parameter starts at `direct`.
+Switch to `protected-redirect` after the public photo, manifest, video, and signed
+media checks pass on the site. Verify existing URLs, browser CORS requests, and
+ZIP downloads before setting `redirect-only`, which removes the legacy WAF
+association and S3 read grant. Returning to `direct` restores the old path.

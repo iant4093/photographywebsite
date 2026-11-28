@@ -161,33 +161,41 @@ def request_public_api_invalidation(*, album_id=None, catalog=False, random_phot
         return False
 
 
+def media_invalidation_targets(paths):
+    """Invalidate viewer paths and the rewritten S3 keys on the frontend."""
+    legacy = os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip()
+    public = os.environ.get("PUBLIC_MEDIA_DISTRIBUTION_ID", "").strip()
+    targets = [(legacy, paths)] if legacy else []
+    if public:
+        canonical = [*paths, *(f"/media{path}" for path in paths)]
+        if public == legacy:
+            targets = [(public, canonical)]
+        else:
+            targets.append((public, canonical))
+    return targets
+
+
 def invalidate_public_previews(album_id, *, reason="preview-revocation", strict=False):
     """Purge the cacheable namespace before/after a public visibility transition."""
-    album_id = validate_uuid(album_id)
-    distribution_id = os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip()
-    return _create_invalidation(
-        distribution_id,
-        [f"/public-previews/{album_id}/*"],
-        reason,
-        strict=strict,
-    )
+    return invalidate_media_paths([f"/public-previews/{validate_uuid(album_id)}/*"], reason, strict=strict)
+
+
+def invalidate_media_paths(paths, reason, *, strict=False):
+    results = [
+        _create_invalidation(distribution, viewer_paths, reason, strict=strict)
+        for distribution, viewer_paths in media_invalidation_targets(paths)
+    ]
+    return bool(results) and all(results)
+
+
+def album_media_invalidation_paths(album):
+    album_id = validate_uuid((album or {}).get("albumId"))
+    return sorted({f"/{prefix}*" for prefix in album_media_prefixes(album)} | {f"/public-previews/{album_id}/*"})
 
 
 def invalidate_album_media(album, *, reason="media-revocation", strict=False):
-    """Purge originals, derivatives, and their rewritten public-preview URLs.
-
-    Use the same trusted namespaces as media authorization and deletion;
-    mutable historical s3Prefix values must never broaden an invalidation.
-    """
-    album_id = validate_uuid((album or {}).get("albumId"))
-    paths = [f"/{prefix}*" for prefix in album_media_prefixes(album)]
-    paths.append(f"/public-previews/{album_id}/*")
-    return _create_invalidation(
-        os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip(),
-        paths,
-        reason,
-        strict=strict,
-    )
+    """Purge trusted album namespaces and their public-preview viewer paths."""
+    return invalidate_media_paths(album_media_invalidation_paths(album), reason, strict=strict)
 
 
 def reset_cache_invalidation_client_for_tests():
@@ -198,16 +206,28 @@ def reset_cache_invalidation_client_for_tests():
 
 def prepare_media_revocation(album, operation_id):
     """Persist this receipt before submission so a lost response is idempotent."""
-    distribution = os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip()
-    if not distribution:
+    targets = media_invalidation_targets(album_media_invalidation_paths(album))
+    if not targets:
         raise RuntimeError("Privacy cache invalidation is not configured")
     album_id = validate_uuid(album["albumId"])
-    return {"distribution": distribution, "caller": f"media-revocation-{album_id}-{operation_id}",
-            "paths": sorted({f"/{prefix}*" for prefix in album_media_prefixes(album)} | {f"/public-previews/{album_id}/*"})}
+    parent, *extra = (
+        {"distribution": distribution, "caller": f"media-revocation-{album_id}-{operation_id}",
+         "paths": sorted(set(paths))}
+        for distribution, paths in targets
+    )
+    if extra:
+        parent["additional"] = extra
+    return parent
 
 
 def advance_media_revocation(receipt):
-    """Check once; the existing queue owns waiting, never a sleeping Lambda."""
+    """Poll both edges independently, preserving single-edge receipts in flight."""
+    primary = _advance_invalidation(receipt)
+    additional = [_advance_invalidation(item) for item in receipt.get("additional", [])]
+    return primary and all(additional)
+
+
+def _advance_invalidation(receipt):
     if receipt.get("complete"):
         return True
     now = int(time.time())

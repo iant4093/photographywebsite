@@ -35,6 +35,8 @@ FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
 WAF_URI_PATH = {"UriPath": {}}
 WAF_HOST_HEADER = {"SingleHeader": {"Name": "host"}}
 PUBLIC_MEDIA_PATH = "/media/"
+PUBLIC_MEDIA_ORIGIN_ID = "ian-photography-public-media-v1"
+PUBLIC_MEDIA_FUNCTION_NAME = "iantruongphotography-public-media-v1"
 WAF_RATE_LIMIT_CONTRACT = (
     ("ExplorePerIpRateLimit", "IP", 600, WAF_URI_PATH, "/api/public/explore", "EXACTLY"),
     ("ApiPerIpRateLimit", "IP", 3000, WAF_URI_PATH, "/api/", "STARTS_WITH"),
@@ -223,10 +225,19 @@ def assert_no_foreign_viewer_request_function(
             if association.get("EventType") != "viewer-request":
                 continue
             arn = association.get("FunctionARN", "")
+            if is_public_media_behavior(behavior) and arn.endswith(f":function/{PUBLIC_MEDIA_FUNCTION_NAME}"):
+                continue
             if not any(arn.endswith(f":function/{name}") for name in allowed):
                 raise RuntimeError(
                     "Refusing www redirect: an unmanaged viewer-request function is already associated"
                 )
+
+
+def is_public_media_behavior(behavior: dict[str, Any]) -> bool:
+    return (
+        behavior.get("PathPattern", "").lstrip("/").startswith(PUBLIC_MEDIA_PATH.lstrip("/"))
+        and behavior.get("TargetOriginId") == PUBLIC_MEDIA_ORIGIN_ID
+    )
 
 
 def associate_viewer_request(behavior: dict[str, Any], function_arn: str) -> None:
@@ -1516,7 +1527,8 @@ def main() -> int:
     managed = api_behaviors + private_media_behaviors + immutable + static
     if request_router_enabled:
         for behavior in preserved:
-            associate_viewer_request(behavior, redirect_arn)
+            if not is_public_media_behavior(behavior):
+                associate_viewer_request(behavior, redirect_arn)
     desired_distribution["CacheBehaviors"] = {
         "Quantity": len(managed) + len(preserved),
         "Items": managed + preserved,
