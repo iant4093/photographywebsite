@@ -40,6 +40,13 @@ function handler(event) {
         };
     }
 
+    // After the legacy CDN redirects a cross-origin browser request, its
+    // preflight can arrive with an opaque Origin. S3 CORS expects the site
+    // origin; CloudFront supplies the anonymous public CORS response.
+    if (request.method === 'OPTIONS' && request.headers.origin && request.headers.origin.value === 'null') {
+        request.headers.origin = { value: 'https://__APEX_HOST__' };
+    }
+
     // Keep public cache keys distinct from signed requests for the same object.
     request.headers['x-public-media-cache'] = { value: 'public' };
     return request;

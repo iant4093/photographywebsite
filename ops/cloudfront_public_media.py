@@ -42,7 +42,7 @@ def cache_policy(source, *, enable_cache):
         "HeaderBehavior": "whitelist",
         "Headers": {"Quantity": 1, "Items": [CACHE_HEADER]},
     }
-    if not enable_cache:
+    if not enable_cache or config["MaxTTL"] == 0:
         # CloudFront requires a nonzero maximum when the cache key uses headers.
         config.update(MinTTL=0, DefaultTTL=0, MaxTTL=1)
     return config

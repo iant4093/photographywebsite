@@ -436,6 +436,9 @@ class PublicMediaCanaryTests(unittest.TestCase):
                                    headers={"x-public-media-cache": {"value": "viewer"}})
         self.assertEqual(result["uri"], "/albums/example/photo.jpg")
         self.assertEqual(result["headers"]["x-public-media-cache"], {"value": "public"})
+        preflight = self.event_result("cloudfront_public_media.js", "/media/site/hero/current/hero.jpg",
+                                      headers={"origin": {"value": "null"}}, method="OPTIONS")
+        self.assertEqual(preflight["headers"]["origin"], {"value": "https://site.test"})
         denied = (
             "/media/temp-zips/example.zip",
             "/media/album-zips/example.zip",
@@ -469,6 +472,8 @@ class PublicMediaCanaryTests(unittest.TestCase):
         ready = cloudfront_public_media.cache_policy(original, enable_cache=True)
         self.assertEqual(canary["MaxTTL"], 1)
         self.assertEqual(ready["MaxTTL"], 86400)
+        revalidate = cloudfront_public_media.cache_policy({**original, "DefaultTTL": 0, "MaxTTL": 0}, enable_cache=True)
+        self.assertEqual((revalidate["DefaultTTL"], revalidate["MaxTTL"]), (0, 1))
         self.assertEqual(
             ready["ParametersInCacheKeyAndForwardedToOrigin"]["HeadersConfig"]["Headers"]["Items"],
             ["x-public-media-cache"],
